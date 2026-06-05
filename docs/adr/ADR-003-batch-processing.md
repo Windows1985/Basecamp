@@ -12,7 +12,7 @@ The system needs to process sensor data and produce a recovery score. The questi
 Batch processing. Three lightweight daemons log raw data overnight. All ML inference runs as a single batch job triggered by wake detection.
 
 ## Reasoning
-The user is asleep during data collection and cannot act on real-time output. Running ML inference overnight burns CPU continuously, generates heat which biases environmental sensors, and creates failure modes where a crashed process loses data mid-night. Batch processing is independently restartable, easier to debug, and produces results at the only moment they are useful which is after waking up.
+I am asleep during data collection and cannot act on real-time output. Running ML inference overnight burns CPU continuously, generates heat which biases environmental sensors, and creates failure modes where a crashed process loses data mid-night. Batch processing is independently restartable, easier to debug, and produces results at the only moment they are useful which is after waking up.
 
 ## Consequences
 No live feedback during the night. The only real-time output is bed presence detection via radar, which is a simple threshold operation rather than ML inference. Recovery score arrives approximately 5 to 8 minutes after waking.
