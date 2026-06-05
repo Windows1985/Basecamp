@@ -7,12 +7,14 @@ import sys
 from datetime import datetime, timedelta
 
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.config import DB_PATH
 from server.db import init_db, get_connection, get_latest_session_id
 
 app = Flask(__name__, template_folder="templates")
+CORS(app)
 
 _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", DB_PATH)
