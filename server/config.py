@@ -1,0 +1,25 @@
+DB_PATH = "data/basecamp.db"
+CSI_UDP_PORT = 5006
+CSI_UDP_HOST = "0.0.0.0"
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_CHUNK_SECONDS = 30
+SILENCE_THRESHOLD = 0.01
+SNORE_THRESHOLD = 0.05
+SNORE_FREQ_LOW = 60
+SNORE_FREQ_HIGH = 500
+RADAR_SERIAL_PORT = "/dev/ttyAMA0"
+RADAR_BAUD_RATE = 256000
+MIN_SLEEP_HOURS = 4
+I2C_BUS = 1
+SHT40_ADDR = 0x44
+BH1750_ADDR = 0x23
+SCD40_ADDR = 0x62
+SGP40_ADDR = 0x59
+NTFY_TOPIC = "basecamp-recovery"
+NTFY_SERVER = "https://ntfy.sh"
+RECOVERY_WEIGHTS = {
+    "architecture": 0.40,
+    "continuity": 0.25,
+    "breathing": 0.20,
+    "environment": 0.15,
+}
