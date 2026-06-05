@@ -1,0 +1,10 @@
+# Core pipeline
+numpy>=1.26.0
+scikit-learn>=1.4.0
+requests>=2.31.0
+
+# Morning web app
+flask>=3.0.0
+
+# No hardware-specific libraries here (RPi.GPIO, smbus2, board, etc.)
+# Those will be added in a Pi-specific requirements file when the hardware arrives.
