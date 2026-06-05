@@ -32,7 +32,7 @@ I2C addresses for reference:
 | SD | GPIO 20 | Serial data out |
 | L/R | GND | Sets microphone to left channel |
 
-Enable I2S in /boot/config.txt by adding: dtparam=i2s=on
+Enable I2S in /boot/config.txt and install an appropriate ALSA/device-tree overlay for the INMP441; set dtparam=i2s=on.
 
 ## UART (HLK-LD2410C radar)
 
