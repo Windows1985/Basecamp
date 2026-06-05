@@ -46,19 +46,15 @@ The more accurate framing is not that this system competes with a wearable on th
 
 ## Project structure
 
-\\\
-basecamp/
-+-- hardware/         Bill of materials, enclosure STL, wiring reference
-+-- firmware/         ESP32 flashing scripts and CSI configuration
-+-- server/           Overnight logging daemons running on the Pi
-+-- pipeline/         Morning batch job, feature extraction, ML models, scoring
-+-- dashboard/        React web app for sleep and recovery visualisation
-+-- morning/          Flask app for daily subjective log (Recovery, Energy, Clarity, Mood)
-+-- analysis/         Jupyter notebooks for correlation analysis and model evaluation
-+-- docs/
-    +-- adr/          Architecture Decision Records documenting every major design choice
-    +-- build-log/    Weekly entries covering what was built, what failed, and what changed
-\\\
+- **hardware/** — bill of materials, enclosure STL, wiring reference
+- **firmware/** — ESP32 flashing scripts and CSI configuration
+- **server/** — overnight logging daemons running on the Pi
+- **pipeline/** — morning batch job, feature extraction, ML models, scoring
+- **dashboard/** — React web app for sleep and recovery visualisation
+- **morning/** — Flask app for daily subjective log
+- **analysis/** — Jupyter notebooks for correlation analysis and model evaluation
+- **docs/adr/** — Architecture Decision Records documenting every major design choice
+- **docs/build-log/** — weekly entries covering what was built, what failed, and what changed
 
 ## Known limitations
 
@@ -67,3 +63,4 @@ Concrete walls between rooms mean nodes must be in the same room as the area bei
 ## Status
 
 Currently in active development. Hardware assembly and first data collection in progress.
+
