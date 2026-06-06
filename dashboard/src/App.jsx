@@ -145,7 +145,8 @@ function ScoreRing({ score, size = 200 }) {
       {/* Radial glow */}
       <div style={{
         position: "absolute", inset: 0, borderRadius: "50%",
-        background: `radial-gradient(circle at center, ${color}22 0%, transparent 68%)`,
+        background: `radial-gradient(circle at center, ${color}40 0%, transparent 68%)`,
+        filter: "blur(80px)",
         pointerEvents: "none",
       }} />
       <svg width={size} height={size} style={{ position: "absolute", inset: 0 }}>
@@ -335,8 +336,8 @@ function Trends({ scores, loading }) {
   const chartData = scores
     .filter(d => d.total_score != null)
     .slice(-30)
-    .map(d => ({
-      date: fmtDateShort(d.bed_entry),
+    .map((d, i) => ({
+      date: d.bed_entry ? d.bed_entry.slice(5, 10) : String(i),
       score: Math.round(d.total_score),
       arch: Math.round(d.architecture_score || 0),
       cont: Math.round(d.continuity_score || 0),
@@ -375,7 +376,7 @@ function Trends({ scores, loading }) {
             <ReferenceLine y={75} stroke={C.muted} strokeDasharray="4 4"
               label={{ value: "target", position: "insideTopRight", fill: C.muted, fontSize: 9, fontFamily: SANS }} />
             <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}/100`, "Recovery"]} />
-            <Area type="monotone" dataKey="score"
+            <Area type="basis" dataKey="score"
               stroke={C.teal} strokeWidth={2} fill="url(#tealGrad)" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -403,10 +404,10 @@ function Trends({ scores, loading }) {
               iconType="plainline"
               wrapperStyle={{ fontFamily: SANS, fontSize: 11, color: C.body, paddingTop: 10 }}
             />
-            <Line type="monotone" dataKey="arch" stroke={C.arch} strokeWidth={1.5} dot={false} name="Architecture" />
-            <Line type="monotone" dataKey="cont" stroke={C.cont} strokeWidth={1.5} dot={false} name="Continuity" />
-            <Line type="monotone" dataKey="brth" stroke={C.brth} strokeWidth={1.5} dot={false} name="Breathing" />
-            <Line type="monotone" dataKey="env"  stroke={C.env}  strokeWidth={1.5} dot={false} name="Environment" />
+            <Line type="basis" dataKey="arch" stroke={C.arch} strokeWidth={1.5} dot={false} name="Architecture" />
+            <Line type="basis" dataKey="cont" stroke={C.cont} strokeWidth={1.5} dot={false} name="Continuity" />
+            <Line type="basis" dataKey="brth" stroke={C.brth} strokeWidth={1.5} dot={false} name="Breathing" />
+            <Line type="basis" dataKey="env"  stroke={C.env}  strokeWidth={1.5} dot={false} name="Environment" />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -422,11 +423,24 @@ const STAGE_COLORS = {
   rem:   "#00e5a0",
 };
 
+// Classifier outputs three classes only: awake, deep, light (light/REM combined)
 function classifyStage(br, mp) {
-  if (mp > 0.3)                         return "awake";
+  if (mp > 0.3)                            return "awake";
   if (mp < 0.10 && br >= 10 && br < 13.8) return "deep";
-  if (mp < 0.08 && br > 14.8)           return "rem";
   return "light";
+}
+
+// Rendering-only split: light windows with high breathing variance → rem
+const BR_VAR_THRESHOLD = 2.0;
+const BR_VAR_WIN = 10;
+function renderingStage(classifiedStages, brValues, i) {
+  if (classifiedStages[i] !== "light") return classifiedStages[i];
+  const lo = Math.max(0, i - Math.floor(BR_VAR_WIN / 2));
+  const hi = Math.min(brValues.length, lo + BR_VAR_WIN);
+  const slice = brValues.slice(lo, hi);
+  const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+  const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / slice.length;
+  return variance > BR_VAR_THRESHOLD ? "rem" : "light";
 }
 
 function SleepBreakdown({ data, loading }) {
@@ -444,16 +458,20 @@ function SleepBreakdown({ data, loading }) {
   if (!data || !data.csi?.length)
     return <Placeholder>No detailed sleep data available yet.</Placeholder>;
 
-  // Classify then smooth with 10-window mode filter
+  // Classify (3 classes) then smooth with 10-window mode filter
   const rawStages = data.csi.map(row => classifyStage(row.br ?? 14, row.mp ?? 0.1));
   const stages = modeFilter(rawStages, 10);
 
+  // Split light → rem for rendering only, based on breathing irregularity
+  const brValues = data.csi.map(row => row.br ?? 14);
+  const renderStages = stages.map((_, i) => renderingStage(stages, brValues, i));
+
   // Collapse to runs for efficient rendering
   const runs = [];
-  let cur = { stage: stages[0], count: 1 };
-  for (let i = 1; i < stages.length; i++) {
-    if (stages[i] === cur.stage) { cur.count++; }
-    else { runs.push({ ...cur }); cur = { stage: stages[i], count: 1 }; }
+  let cur = { stage: renderStages[0], count: 1 };
+  for (let i = 1; i < renderStages.length; i++) {
+    if (renderStages[i] === cur.stage) { cur.count++; }
+    else { runs.push({ ...cur }); cur = { stage: renderStages[i], count: 1 }; }
   }
   runs.push({ ...cur });
 
@@ -475,13 +493,19 @@ function SleepBreakdown({ data, loading }) {
     }
   }
 
-  // Sensor data
-  const co2Data = (data.sensors || []).map((s, i) => ({
-    i,
-    co2:  Math.round(s.co2_ppm ?? 700),
-    temp: parseFloat((s.temperature ?? 20).toFixed(1)),
-  }));
-  const co2Max = co2Data.length ? Math.max(...co2Data.map(d => d.co2), 1200) : 2000;
+  // Sensor data — downsample to ~100 points for smooth rendering
+  const rawSensors = data.sensors || [];
+  const step = rawSensors.length > 150 ? Math.floor(rawSensors.length / 100) : 1;
+  const sensorData = rawSensors
+    .filter((_, i) => i % step === 0)
+    .map((s, i) => ({
+      i,
+      co2:      Math.round(s.co2_ppm ?? 700),
+      temp:     parseFloat((s.temperature ?? 20).toFixed(1)),
+      humidity: parseFloat((s.humidity ?? 50).toFixed(1)),
+      voc:      Math.round(s.voc_index ?? 100),
+    }));
+  const co2Max = sensorData.length ? Math.max(...sensorData.map(d => d.co2), 1200) : 2000;
 
   return (
     <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
@@ -522,21 +546,24 @@ function SleepBreakdown({ data, loading }) {
 
         {/* Legend */}
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-          {Object.entries(STAGE_COLORS).map(([label, color]) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />
-              <span style={{
-                fontFamily: SANS, fontSize: 10, color: C.muted, textTransform: "capitalize",
-              }}>
-                {label}
-              </span>
+          {[["awake", "Wake"], ["light", "Light"], ["deep", "Deep"], ["rem", "REM"]].map(([key, label]) => (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 10, height: 10, background: STAGE_COLORS[key], borderRadius: 2 }} />
+              <span style={{ fontFamily: SANS, fontSize: 10, color: C.muted }}>{label}</span>
             </div>
           ))}
         </div>
+        {/* Transparency note */}
+        <p style={{
+          fontFamily: SANS, fontSize: 9, color: C.muted, marginTop: 8, lineHeight: 1.5,
+          fontStyle: "italic",
+        }}>
+          REM estimated from breathing irregularity within light sleep classification
+        </p>
       </div>
 
       {/* CO2 chart */}
-      {co2Data.length > 0 && (
+      {sensorData.length > 0 && (
         <div style={{
           background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
           padding: "14px 4px 8px",
@@ -548,7 +575,7 @@ function SleepBreakdown({ data, loading }) {
             CO₂ (PPM)
           </p>
           <ResponsiveContainer width="100%" height={140}>
-            <AreaChart data={co2Data} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="co2Grad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor={C.amber} stopOpacity={0.20} />
@@ -564,7 +591,7 @@ function SleepBreakdown({ data, loading }) {
               <ReferenceLine y={1500} stroke={C.red} strokeDasharray="4 3"
                 label={{ value: "poor", position: "insideTopLeft", fill: C.red, fontSize: 9, fontFamily: SANS }} />
               <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v} ppm`, "CO₂"]} />
-              <Area type="monotone" dataKey="co2"
+              <Area type="basis" dataKey="co2"
                 stroke={C.amber} strokeWidth={1.5} fill="url(#co2Grad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -572,7 +599,7 @@ function SleepBreakdown({ data, loading }) {
       )}
 
       {/* Temperature chart */}
-      {co2Data.length > 0 && (
+      {sensorData.length > 0 && (
         <div style={{
           background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
           padding: "14px 4px 8px",
@@ -584,7 +611,7 @@ function SleepBreakdown({ data, loading }) {
             TEMPERATURE (°C)
           </p>
           <ResponsiveContainer width="100%" height={110}>
-            <AreaChart data={co2Data} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="tempGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor={C.blue} stopOpacity={0.22} />
@@ -596,8 +623,72 @@ function SleepBreakdown({ data, loading }) {
                 tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
                 tickLine={false} axisLine={false} />
               <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}°C`, "Temp"]} />
-              <Area type="monotone" dataKey="temp"
+              <Area type="basis" dataKey="temp"
                 stroke={C.blue} strokeWidth={1.5} fill="url(#tempGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Humidity chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            HUMIDITY (%)
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="humGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#a78bfa" stopOpacity={0.22} />
+                  <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={["auto", "auto"]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}%`, "Humidity"]} />
+              <Area type="basis" dataKey="humidity"
+                stroke="#a78bfa" strokeWidth={1.5} fill="url(#humGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* VOC chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            VOC INDEX
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="vocGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#34d399" stopOpacity={0.20} />
+                  <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={["auto", "auto"]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}`, "VOC Index"]} />
+              <Area type="basis" dataKey="voc"
+                stroke="#34d399" strokeWidth={1.5} fill="url(#vocGrad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
