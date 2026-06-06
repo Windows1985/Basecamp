@@ -166,6 +166,33 @@ def latest():
     })
 
 
+@app.route("/scores")
+def scores():
+    """All sessions that have recovery scores, one row per session (latest score),
+    ordered by bed_entry ascending. Used by the dashboard Trends view."""
+    _ensure_db()
+    conn = get_connection(_DB_PATH)
+    try:
+        rows = conn.execute(
+            """
+            SELECT ss.bed_entry, ss.bed_exit, ss.duration_hours,
+                   rs.total_score, rs.architecture_score, rs.continuity_score,
+                   rs.breathing_score, rs.environment_score, rs.timestamp
+            FROM recovery_scores rs
+            JOIN sleep_sessions ss ON ss.id = rs.session_id
+            WHERE rs.id = (
+                SELECT id FROM recovery_scores r2
+                WHERE r2.session_id = rs.session_id
+                ORDER BY r2.timestamp DESC LIMIT 1
+            )
+            ORDER BY ss.bed_entry ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 if __name__ == "__main__":
     _ensure_db()
     app.run(host="0.0.0.0", port=5000, debug=False)
