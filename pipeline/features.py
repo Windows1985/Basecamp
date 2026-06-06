@@ -15,6 +15,14 @@ def extract_features(session_id, db_path):
     """
     Load all sensor data for a session and return a feature dictionary.
     """
+    # Populate csi_readings from the raw variance signal if available.
+    # Falls back silently to any existing csi_readings rows (e.g., from simulate.py).
+    try:
+        from pipeline.csi import extract_csi_features
+        extract_csi_features(session_id, db_path)
+    except Exception:
+        pass
+
     conn = get_connection(db_path)
     try:
         session = conn.execute(
