@@ -4,194 +4,460 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Basecamp — Morning Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg:      #050810;
+      --card:    #0d1117;
+      --border:  rgba(255,255,255,0.06);
+      --teal:    #00e5a0;
+      --amber:   #f5a623;
+      --red:     #ff4d6d;
+      --label:   rgba(255,255,255,0.4);
+      --body:    rgba(255,255,255,0.75);
+      --muted:   rgba(255,255,255,0.25);
+    }
+
     body {
-      background: #0f1117;
-      color: #e2e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: rgba(255,255,255,0.85);
+      font-family: 'Inter', sans-serif;
       min-height: 100dvh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 1.5rem 1rem 2rem;
+      padding: 28px 20px 48px;
     }
 
-    h1 {
-      font-size: 1.4rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      color: #94a3b8;
-      margin-bottom: 1.5rem;
-    }
-
-    form {
+    .container {
       width: 100%;
-      max-width: 420px;
+      max-width: 400px;
       display: flex;
       flex-direction: column;
-      gap: 1.4rem;
+      gap: 28px;
     }
 
-    .field { display: flex; flex-direction: column; gap: 0.4rem; }
-
-    .field label {
+    /* ── Header ── */
+    .header {
       display: flex;
+      align-items: flex-start;
       justify-content: space-between;
-      font-size: 0.9rem;
-      color: #94a3b8;
     }
 
-    .field label span.val {
-      color: #e2e8f0;
-      font-weight: 600;
-      min-width: 1.4rem;
-      text-align: right;
+    .date-label {
+      font-family: 'DM Mono', monospace;
+      font-weight: 300;
+      font-size: 22px;
+      letter-spacing: 0.04em;
+      color: rgba(255,255,255,0.85);
+      line-height: 1;
     }
+
+    .last-score-block {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+    }
+
+    .last-score-value {
+      font-family: 'DM Mono', monospace;
+      font-weight: 300;
+      font-size: 32px;
+      line-height: 1;
+      color: var(--teal);
+    }
+
+    .last-score-label {
+      font-family: 'Inter', sans-serif;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      color: var(--label);
+      text-transform: uppercase;
+    }
+
+    /* ── Sliders ── */
+    .sliders { display: flex; flex-direction: column; gap: 18px; }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .slider-label {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      color: var(--label);
+      text-transform: uppercase;
+      min-width: 64px;
+      flex-shrink: 0;
+    }
+
+    .slider-wrap { flex: 1; }
 
     input[type="range"] {
       -webkit-appearance: none;
       appearance: none;
       width: 100%;
-      height: 6px;
-      border-radius: 3px;
-      background: #1e293b;
+      height: 3px;
+      border-radius: 2px;
       outline: none;
       cursor: pointer;
+      background: linear-gradient(
+        to right,
+        var(--teal) 0%,
+        var(--teal) var(--fill, 44%),
+        rgba(255,255,255,0.10) var(--fill, 44%),
+        rgba(255,255,255,0.10) 100%
+      );
     }
 
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      appearance: none;
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       border-radius: 50%;
-      background: #3b82f6;
+      background: #fff;
       cursor: pointer;
+      box-shadow: 0 0 0 2px rgba(0,229,160,0.35);
+      transition: box-shadow 150ms ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      box-shadow: 0 0 0 5px rgba(0,229,160,0.20);
     }
 
     input[type="range"]::-moz-range-thumb {
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       border-radius: 50%;
-      background: #3b82f6;
+      background: #fff;
       border: none;
+      box-shadow: 0 0 0 2px rgba(0,229,160,0.35);
       cursor: pointer;
+    }
+
+    .slider-value {
+      font-family: 'DM Mono', monospace;
+      font-weight: 300;
+      font-size: 17px;
+      color: rgba(255,255,255,0.85);
+      min-width: 18px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Notes ── */
+    .notes-section label {
+      display: block;
+      font-family: 'Inter', sans-serif;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      color: var(--label);
+      text-transform: uppercase;
+      margin-bottom: 8px;
     }
 
     textarea {
-      background: #1e293b;
-      border: 1px solid #334155;
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      color: #e2e8f0;
-      font-size: 0.9rem;
-      min-height: 80px;
-      padding: 0.7rem;
-      resize: vertical;
+      color: rgba(255,255,255,0.8);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 10px 12px;
+      resize: none;
       width: 100%;
+      transition: border-color 150ms ease;
     }
 
-    textarea::placeholder { color: #475569; }
-    textarea:focus { outline: none; border-color: #3b82f6; }
+    textarea:focus { outline: none; border-color: rgba(0,229,160,0.35); }
+    textarea::placeholder { color: rgba(255,255,255,0.18); }
+
+    /* ── Submit ── */
+    .submit-section { display: flex; flex-direction: column; gap: 8px; }
 
     button[type="submit"] {
-      background: #3b82f6;
+      background: var(--teal);
       border: none;
-      border-radius: 10px;
-      color: #fff;
+      border-radius: 8px;
+      color: #040a0e;
       cursor: pointer;
-      font-size: 1rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
       font-weight: 600;
-      padding: 0.85rem;
-      transition: background 0.15s;
+      padding: 14px;
+      width: 100%;
+      transition: opacity 150ms ease;
     }
 
-    button[type="submit"]:hover { background: #2563eb; }
-    button[type="submit"]:active { background: #1d4ed8; }
+    button[type="submit"]:hover  { opacity: 0.88; }
+    button[type="submit"]:active { opacity: 0.72; }
 
     #status {
-      margin-top: 0.8rem;
-      font-size: 0.85rem;
-      color: #4ade80;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
       text-align: center;
-      min-height: 1.2rem;
+      color: var(--teal);
+      min-height: 18px;
+    }
+
+    /* ── 7-day history strip ── */
+    .strip-section {}
+
+    .strip-header {
+      font-family: 'Inter', sans-serif;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      color: var(--label);
+      text-transform: uppercase;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .history-strip {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+    }
+
+    .history-day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .history-square {
+      width: 38px;
+      height: 38px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'DM Mono', monospace;
+      font-weight: 400;
+      font-size: 11px;
+    }
+
+    .history-day-label {
+      font-family: 'Inter', sans-serif;
+      font-size: 8px;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      text-transform: uppercase;
     }
   </style>
 </head>
 <body>
-  <h1>Morning Log</h1>
+  <div class="container">
 
-  <form id="log-form">
-    <div class="field">
-      <label>Recovery <span class="val" id="v-recovery">5</span></label>
-      <input type="range" id="recovery" name="recovery" min="1" max="10" value="5" />
+    <!-- Header: date + last night score -->
+    <div class="header">
+      <span class="date-label" id="date-label">— — —</span>
+      <div class="last-score-block">
+        <span class="last-score-value" id="score-value">—</span>
+        <span class="last-score-label">Last night</span>
+      </div>
     </div>
 
-    <div class="field">
-      <label>Energy <span class="val" id="v-energy">5</span></label>
-      <input type="range" id="energy" name="energy" min="1" max="10" value="5" />
+    <!-- Log form -->
+    <form id="log-form">
+      <div class="sliders">
+        <div class="slider-row">
+          <span class="slider-label">Recovery</span>
+          <div class="slider-wrap">
+            <input type="range" id="recovery" name="recovery" min="1" max="10" value="5" />
+          </div>
+          <span class="slider-value" id="v-recovery">5</span>
+        </div>
+
+        <div class="slider-row">
+          <span class="slider-label">Energy</span>
+          <div class="slider-wrap">
+            <input type="range" id="energy" name="energy" min="1" max="10" value="5" />
+          </div>
+          <span class="slider-value" id="v-energy">5</span>
+        </div>
+
+        <div class="slider-row">
+          <span class="slider-label">Clarity</span>
+          <div class="slider-wrap">
+            <input type="range" id="clarity" name="clarity" min="1" max="10" value="5" />
+          </div>
+          <span class="slider-value" id="v-clarity">5</span>
+        </div>
+
+        <div class="slider-row">
+          <span class="slider-label">Mood</span>
+          <div class="slider-wrap">
+            <input type="range" id="mood" name="mood" min="1" max="10" value="5" />
+          </div>
+          <span class="slider-value" id="v-mood">5</span>
+        </div>
+      </div>
+
+      <div class="notes-section" style="margin-top: 22px;">
+        <label>Notes</label>
+        <textarea id="notes" name="notes" rows="2" placeholder="Anything to note about last night…"></textarea>
+      </div>
+
+      <div class="submit-section" style="margin-top: 20px;">
+        <button type="submit">Log morning</button>
+        <p id="status"></p>
+      </div>
+    </form>
+
+    <!-- 7-day history strip -->
+    <div class="strip-section">
+      <p class="strip-header">Last 7 nights</p>
+      <div class="history-strip" id="history-strip"></div>
     </div>
 
-    <div class="field">
-      <label>Clarity <span class="val" id="v-clarity">5</span></label>
-      <input type="range" id="clarity" name="clarity" min="1" max="10" value="5" />
-    </div>
-
-    <div class="field">
-      <label>Mood <span class="val" id="v-mood">5</span></label>
-      <input type="range" id="mood" name="mood" min="1" max="10" value="5" />
-    </div>
-
-    <div class="field">
-      <label>Notes (optional)</label>
-      <textarea id="notes" name="notes" placeholder="Anything to note about last night…"></textarea>
-    </div>
-
-    <button type="submit">Submit</button>
-    <p id="status"></p>
-  </form>
+  </div>
 
   <script>
-    const sliders = ["recovery", "energy", "clarity", "mood"];
-    sliders.forEach(id => {
-      const el = document.getElementById(id);
-      const val = document.getElementById("v-" + id);
-      el.addEventListener("input", () => { val.textContent = el.value; });
+    const SLIDERS = ["recovery", "energy", "clarity", "mood"];
+    const DAY_NAMES   = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+    const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+    // ── Date header ──────────────────────────────────────────────────────────
+    const now = new Date();
+    document.getElementById("date-label").textContent =
+      `${DAY_NAMES[now.getDay()]} ${String(now.getDate()).padStart(2,"0")} ${MONTH_NAMES[now.getMonth()]}`;
+
+    // ── Slider fill helper ───────────────────────────────────────────────────
+    function setFill(el) {
+      const pct = ((el.value - el.min) / (el.max - el.min)) * 100;
+      el.style.setProperty("--fill", pct + "%");
+    }
+
+    // ── Load persisted values ────────────────────────────────────────────────
+    SLIDERS.forEach(id => {
+      const el  = document.getElementById(id);
+      const val = localStorage.getItem("bc_" + id);
+      if (val !== null) {
+        el.value = val;
+        document.getElementById("v-" + id).textContent = val;
+      }
+      setFill(el);
+      el.addEventListener("input", () => {
+        document.getElementById("v-" + id).textContent = el.value;
+        setFill(el);
+      });
     });
 
+    // ── Fetch last night's recovery score ────────────────────────────────────
+    fetch("/latest")
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.total_score != null) {
+          const el = document.getElementById("score-value");
+          const s  = Math.round(d.total_score);
+          el.textContent  = s;
+          el.style.color  = s >= 75 ? "#00e5a0" : s >= 50 ? "#f5a623" : "#ff4d6d";
+        }
+      })
+      .catch(() => {});
+
+    // ── 7-day history strip ──────────────────────────────────────────────────
+    fetch("/scores")
+      .then(r => r.json())
+      .then(data => {
+        if (!Array.isArray(data)) return;
+        const strip = document.getElementById("history-strip");
+
+        // Last 7 calendar days (oldest first, today last)
+        for (let offset = -6; offset <= 0; offset++) {
+          const d = new Date();
+          d.setDate(d.getDate() + offset);
+          const dateStr  = d.toISOString().slice(0, 10);
+          const dayLabel = DAY_NAMES[d.getDay()];
+
+          // Match a session whose bed_entry falls on this calendar day
+          const match = data.find(row => row.bed_entry && row.bed_entry.slice(0, 10) === dateStr);
+
+          const dayEl    = document.createElement("div");
+          dayEl.className = "history-day";
+
+          const square = document.createElement("div");
+          square.className = "history-square";
+
+          if (match && match.total_score != null) {
+            const s = Math.round(match.total_score);
+            if (s >= 75) {
+              square.style.background = "rgba(0,229,160,0.14)";
+              square.style.color      = "#00e5a0";
+            } else if (s >= 50) {
+              square.style.background = "rgba(245,166,35,0.14)";
+              square.style.color      = "#f5a623";
+            } else {
+              square.style.background = "rgba(255,77,109,0.14)";
+              square.style.color      = "#ff4d6d";
+            }
+            square.textContent = s;
+          } else {
+            square.style.background = "rgba(255,255,255,0.04)";
+            square.style.color      = "rgba(255,255,255,0.25)";
+            square.textContent      = "—";
+          }
+
+          const label = document.createElement("span");
+          label.className   = "history-day-label";
+          label.textContent = dayLabel;
+
+          dayEl.appendChild(square);
+          dayEl.appendChild(label);
+          strip.appendChild(dayEl);
+        }
+      })
+      .catch(() => {});
+
+    // ── Form submit ──────────────────────────────────────────────────────────
     document.getElementById("log-form").addEventListener("submit", async e => {
       e.preventDefault();
       const status = document.getElementById("status");
-      const payload = {
-        recovery: document.getElementById("recovery").value,
-        energy:   document.getElementById("energy").value,
-        clarity:  document.getElementById("clarity").value,
-        mood:     document.getElementById("mood").value,
-        notes:    document.getElementById("notes").value,
-      };
+      status.textContent = "";
+
+      const payload = Object.fromEntries(
+        SLIDERS.map(id => [id, document.getElementById(id).value])
+      );
+      payload.notes = document.getElementById("notes").value;
 
       try {
-        const res = await fetch("/log", {
+        const res  = await fetch("/log", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
         const data = await res.json();
+
         if (data.status === "ok") {
-          status.style.color = "#4ade80";
-          status.textContent = "Saved — have a good day.";
-          document.getElementById("log-form").reset();
-          sliders.forEach(id => {
-            document.getElementById("v-" + id).textContent = "5";
-          });
+          // Persist to localStorage
+          SLIDERS.forEach(id =>
+            localStorage.setItem("bc_" + id, document.getElementById(id).value)
+          );
+          status.style.color = "#00e5a0";
+          status.innerHTML   = "✓ &nbsp;logged";
+          document.getElementById("notes").value = "";
         } else {
-          status.style.color = "#f87171";
+          status.style.color = "#ff4d6d";
           status.textContent = "Error: " + (data.message || "unknown");
         }
-      } catch (err) {
-        status.style.color = "#f87171";
-        status.textContent = "Network error — are you on the local network?";
+      } catch {
+        status.style.color = "#ff4d6d";
+        status.textContent = "Network error — check connection";
       }
     });
   </script>
