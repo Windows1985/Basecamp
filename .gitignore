@@ -8,6 +8,12 @@ venv/
 # Generated data
 data/*.db
 data/*.pkl
+data/audio/*.opus
+data/audio/*.npz
+data/audio/*.npy
+
+# Runtime logs
+logs/*.log
 
 # Node
 node_modules/
