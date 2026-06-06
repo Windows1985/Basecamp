@@ -1,0 +1,19 @@
+# Installation:
+#   sudo cp /home/pi/basecamp/systemd/basecamp-audio.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable basecamp-audio
+#   sudo systemctl start basecamp-audio
+
+[Unit]
+Description=Basecamp Audio Chunker
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/basecamp
+ExecStart=/usr/bin/python3 /home/pi/basecamp/server/audio.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

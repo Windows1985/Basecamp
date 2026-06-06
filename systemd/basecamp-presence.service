@@ -1,0 +1,19 @@
+# Installation:
+#   sudo cp /home/pi/basecamp/systemd/basecamp-presence.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable basecamp-presence
+#   sudo systemctl start basecamp-presence
+
+[Unit]
+Description=Basecamp Presence Watcher
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/basecamp
+ExecStart=/usr/bin/python3 /home/pi/basecamp/server/presence.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS audio_chunks (
 CREATE TABLE IF NOT EXISTS sleep_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     bed_entry TEXT NOT NULL,
-    bed_exit TEXT NOT NULL,
+    bed_exit TEXT,
     duration_hours REAL
 );
 
