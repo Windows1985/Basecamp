@@ -23,3 +23,5 @@ RECOVERY_WEIGHTS = {
     "breathing": 0.20,
     "environment": 0.15,
 }
+
+MOCK_HARDWARE = True
