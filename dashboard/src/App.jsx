@@ -423,11 +423,24 @@ const STAGE_COLORS = {
   rem:   "#00e5a0",
 };
 
+// Classifier outputs three classes only: awake, deep, light (light/REM combined)
 function classifyStage(br, mp) {
-  if (mp > 0.3)                         return "awake";
+  if (mp > 0.3)                            return "awake";
   if (mp < 0.10 && br >= 10 && br < 13.8) return "deep";
-  if (mp < 0.08 && br > 14.8)           return "rem";
   return "light";
+}
+
+// Rendering-only split: light windows with high breathing variance → rem
+const BR_VAR_THRESHOLD = 2.0;
+const BR_VAR_WIN = 10;
+function renderingStage(classifiedStages, brValues, i) {
+  if (classifiedStages[i] !== "light") return classifiedStages[i];
+  const lo = Math.max(0, i - Math.floor(BR_VAR_WIN / 2));
+  const hi = Math.min(brValues.length, lo + BR_VAR_WIN);
+  const slice = brValues.slice(lo, hi);
+  const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+  const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / slice.length;
+  return variance > BR_VAR_THRESHOLD ? "rem" : "light";
 }
 
 function SleepBreakdown({ data, loading }) {
@@ -445,16 +458,20 @@ function SleepBreakdown({ data, loading }) {
   if (!data || !data.csi?.length)
     return <Placeholder>No detailed sleep data available yet.</Placeholder>;
 
-  // Classify then smooth with 10-window mode filter
+  // Classify (3 classes) then smooth with 10-window mode filter
   const rawStages = data.csi.map(row => classifyStage(row.br ?? 14, row.mp ?? 0.1));
   const stages = modeFilter(rawStages, 10);
 
+  // Split light → rem for rendering only, based on breathing irregularity
+  const brValues = data.csi.map(row => row.br ?? 14);
+  const renderStages = stages.map((_, i) => renderingStage(stages, brValues, i));
+
   // Collapse to runs for efficient rendering
   const runs = [];
-  let cur = { stage: stages[0], count: 1 };
-  for (let i = 1; i < stages.length; i++) {
-    if (stages[i] === cur.stage) { cur.count++; }
-    else { runs.push({ ...cur }); cur = { stage: stages[i], count: 1 }; }
+  let cur = { stage: renderStages[0], count: 1 };
+  for (let i = 1; i < renderStages.length; i++) {
+    if (renderStages[i] === cur.stage) { cur.count++; }
+    else { runs.push({ ...cur }); cur = { stage: renderStages[i], count: 1 }; }
   }
   runs.push({ ...cur });
 
@@ -529,17 +546,20 @@ function SleepBreakdown({ data, loading }) {
 
         {/* Legend */}
         <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
-          {Object.entries(STAGE_COLORS).map(([label, color]) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />
-              <span style={{
-                fontFamily: SANS, fontSize: 10, color: C.muted, textTransform: "capitalize",
-              }}>
-                {label}
-              </span>
+          {[["awake", "Wake"], ["light", "Light"], ["deep", "Deep"], ["rem", "REM"]].map(([key, label]) => (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 10, height: 10, background: STAGE_COLORS[key], borderRadius: 2 }} />
+              <span style={{ fontFamily: SANS, fontSize: 10, color: C.muted }}>{label}</span>
             </div>
           ))}
         </div>
+        {/* Transparency note */}
+        <p style={{
+          fontFamily: SANS, fontSize: 9, color: C.muted, marginTop: 8, lineHeight: 1.5,
+          fontStyle: "italic",
+        }}>
+          REM estimated from breathing irregularity within light sleep classification
+        </p>
       </div>
 
       {/* CO2 chart */}
