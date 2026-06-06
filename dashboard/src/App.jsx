@@ -1,112 +1,309 @@
 import { useState, useEffect } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area,
+  AreaChart, Area, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine, Legend,
 } from "recharts";
 
 const API = "http://localhost:5000";
 
-// ── Colour helpers ──────────────────────────────────────────────────────────
-function scoreColour(v) {
-  if (v == null) return "text-slate-400";
-  if (v >= 80) return "text-emerald-400";
-  if (v >= 60) return "text-yellow-400";
-  return "text-red-400";
-}
-function scoreRing(v) {
-  if (v == null) return "border-slate-600";
-  if (v >= 80) return "border-emerald-500";
-  if (v >= 60) return "border-yellow-500";
-  return "border-red-500";
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg:       "#050810",
+  card:     "#0d1117",
+  elevated: "#141b24",
+  border:   "rgba(255,255,255,0.06)",
+  teal:     "#00e5a0",
+  amber:    "#f5a623",
+  red:      "#ff4d6d",
+  blue:     "#4a90d9",
+  arch:     "#7b8ff7",
+  cont:     "#00e5a0",
+  brth:     "#4a90d9",
+  env:      "#f5a623",
+  label:    "rgba(255,255,255,0.4)",
+  body:     "rgba(255,255,255,0.7)",
+  muted:    "rgba(255,255,255,0.25)",
+};
+
+const COMPONENTS = [
+  { key: "architecture_score", label: "ARCHITECTURE", color: C.arch },
+  { key: "continuity_score",   label: "CONTINUITY",   color: C.cont },
+  { key: "breathing_score",    label: "BREATHING",    color: C.brth },
+  { key: "environment_score",  label: "ENVIRONMENT",  color: C.env  },
+];
+
+const MONO = "'DM Mono', monospace";
+const SANS = "'Inter', sans-serif";
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function scoreAccent(v) {
+  if (v == null) return C.muted;
+  if (v >= 75) return C.teal;
+  if (v >= 50) return C.amber;
+  return C.red;
 }
 
-// ── Shared hooks ─────────────────────────────────────────────────────────────
+function fmtTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  } catch { return "—"; }
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
+  } catch { return iso.slice(5, 10); }
+}
+
+// Mode filter (rolling window) — smooths categorical stage classifications
+// so short isolated blips are absorbed into the surrounding dominant stage
+function modeFilter(arr, win) {
+  const half = Math.floor(win / 2);
+  return arr.map((_, i) => {
+    const slice = arr.slice(Math.max(0, i - half), Math.min(arr.length, i + half + 1));
+    const freq = {};
+    slice.forEach(v => { freq[v] = (freq[v] || 0) + 1; });
+    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+  });
+}
+
+// ── Data hooks ────────────────────────────────────────────────────────────────
 function useLatest() {
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch(`${API}/latest`)
       .then(r => r.json())
-      .then(setData)
-      .catch(setError);
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => { setLoading(false); });
   }, []);
-  return { data, error };
+  return { data, loading };
+}
+
+function useScores() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch(`${API}/scores`)
+      .then(r => r.json())
+      .then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => { setLoading(false); });
+  }, []);
+  return { data, loading };
 }
 
 function useHistory() {
   const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch(`${API}/history`)
       .then(r => r.json())
-      .then(setData)
-      .catch(() => setData([]));
+      .then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => { setLoading(false); });
   }, []);
-  return data;
+  return { data, loading };
+}
+
+// ── Shared primitives ─────────────────────────────────────────────────────────
+function Skeleton({ h = 20, w = "100%", radius = 6, style = {} }) {
+  return (
+    <div style={{
+      height: h, width: w, borderRadius: radius,
+      background: "rgba(255,255,255,0.05)",
+      flexShrink: 0,
+      ...style,
+    }} />
+  );
+}
+
+function Placeholder({ children }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      height: 240, padding: "0 32px", textAlign: "center",
+    }}>
+      <p style={{ color: C.muted, fontFamily: SANS, fontSize: 14, lineHeight: 1.6 }}>{children}</p>
+    </div>
+  );
+}
+
+// SVG circular progress ring with radial glow
+function ScoreRing({ score, size = 200 }) {
+  const r = size / 2 - 9;
+  const circ = 2 * Math.PI * r;
+  const filled = score != null ? Math.min(score / 100, 1) * circ : 0;
+  const color = scoreAccent(score);
+  const cx = size / 2;
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      {/* Radial glow */}
+      <div style={{
+        position: "absolute", inset: 0, borderRadius: "50%",
+        background: `radial-gradient(circle at center, ${color}40 0%, transparent 68%)`,
+        filter: "blur(80px)",
+        pointerEvents: "none",
+      }} />
+      <svg width={size} height={size} style={{ position: "absolute", inset: 0 }}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke={C.border} strokeWidth={3} />
+        {score != null && (
+          <circle
+            cx={cx} cy={cx} r={r} fill="none"
+            stroke={color} strokeWidth={3}
+            strokeDasharray={`${filled} ${circ - filled}`}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${cx} ${cx})`}
+          />
+        )}
+      </svg>
+      {/* Center text */}
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        gap: 2,
+      }}>
+        <span style={{ fontFamily: MONO, fontWeight: 300, fontSize: 76, lineHeight: 1, color }}>
+          {score != null ? Math.round(score) : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Component score card — left color border, label, score, progress bar
+function ComponentCard({ label, value, color }) {
+  const pct = value != null ? Math.min(Math.round(value), 100) : 0;
+  return (
+    <div style={{
+      background: C.card,
+      borderLeft: `3px solid ${color}`,
+      borderRadius: "0 8px 8px 0",
+      padding: "12px 14px 10px",
+      display: "flex", flexDirection: "column", gap: 6,
+    }}>
+      <span style={{
+        fontFamily: SANS, fontSize: 9, fontWeight: 500,
+        letterSpacing: "0.12em", color: C.label,
+      }}>
+        {label}
+      </span>
+      <span style={{
+        fontFamily: MONO, fontWeight: 300, fontSize: 34, lineHeight: 1,
+        color: value != null ? color : C.muted,
+      }}>
+        {value != null ? Math.round(value) : "—"}
+      </span>
+      <div style={{ height: 2, background: "rgba(255,255,255,0.06)", borderRadius: 1 }}>
+        <div style={{
+          height: "100%", width: `${pct}%`, background: color, borderRadius: 1,
+          transition: "width 600ms ease",
+        }} />
+      </div>
+    </div>
+  );
+}
+
+// Factor list item with tinted background and left border
+function FactorItem({ text, positive }) {
+  const color = positive ? C.teal : C.red;
+  return (
+    <li style={{
+      fontFamily: SANS, fontSize: 13, color: C.body, lineHeight: 1.6,
+      background: positive ? "rgba(0,229,160,0.05)" : "rgba(255,77,109,0.05)",
+      borderLeft: `2px solid ${color}`,
+      borderRadius: "0 6px 6px 0",
+      padding: "8px 12px",
+      listStyle: "none",
+    }}>
+      {text}
+    </li>
+  );
 }
 
 // ── Last Night view ───────────────────────────────────────────────────────────
-function LastNight({ data }) {
-  if (!data) return <Placeholder>No recovery data yet. Run the pipeline first.</Placeholder>;
-  if (data.error) return <Placeholder>{data.error}</Placeholder>;
+function LastNight({ data, loading }) {
+  if (loading) {
+    return (
+      <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, paddingTop: 16 }}>
+          <Skeleton h={200} w={200} radius={100} />
+          <Skeleton h={12} w={80} />
+          <Skeleton h={10} w={120} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} h={80} radius={8} />)}
+        </div>
+        <Skeleton h={56} radius={8} />
+        <Skeleton h={56} radius={8} />
+      </div>
+    );
+  }
 
-  const components = [
-    { label: "Architecture", key: "architecture_score" },
-    { label: "Continuity",   key: "continuity_score" },
-    { label: "Breathing",    key: "breathing_score" },
-    { label: "Environment",  key: "environment_score" },
-  ];
+  if (!data || data.error) {
+    return <Placeholder>No recovery data yet.{"\n"}Run the pipeline first.</Placeholder>;
+  }
 
   return (
-    <div className="p-4 space-y-6">
-      {/* Big recovery number */}
-      <div className="flex flex-col items-center pt-4">
-        <div className={`text-8xl font-bold tabular-nums ${scoreColour(data.total_score)}`}>
-          {Math.round(data.total_score)}
-        </div>
-        <div className="text-slate-400 text-sm mt-1 tracking-wide">RECOVERY SCORE</div>
-        <div className="text-slate-500 text-xs mt-1">
-          {data.duration_hours ? `${data.duration_hours.toFixed(1)}h sleep` : ""}
-        </div>
+    <div className="fade-in" style={{ padding: "16px 16px 8px", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Hero */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4 }}>
+        <ScoreRing score={data.total_score} />
+        <span style={{
+          fontFamily: SANS, fontSize: 9, fontWeight: 500,
+          letterSpacing: "0.12em", color: C.label, marginTop: 2,
+        }}>
+          RECOVERY SCORE
+        </span>
+        {data.duration_hours != null && (
+          <span style={{ fontFamily: MONO, fontSize: 13, color: C.body }}>
+            {data.duration_hours.toFixed(1)}h sleep
+          </span>
+        )}
+        {data.bed_entry && data.bed_exit && (
+          <span style={{ fontFamily: MONO, fontSize: 11, color: C.muted }}>
+            {fmtTime(data.bed_entry)} → {fmtTime(data.bed_exit)}
+          </span>
+        )}
       </div>
 
-      {/* Component cards */}
-      <div className="grid grid-cols-2 gap-3">
-        {components.map(({ label, key }) => (
-          <div key={key}
-            className={`bg-slate-800 rounded-xl p-3 border-l-4 ${scoreRing(data[key])}`}>
-            <div className="text-slate-400 text-xs mb-1">{label}</div>
-            <div className={`text-2xl font-semibold tabular-nums ${scoreColour(data[key])}`}>
-              {data[key] != null ? Math.round(data[key]) : "—"}
-            </div>
-          </div>
+      {/* Component cards 2×2 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {COMPONENTS.map(({ key, label, color }) => (
+          <ComponentCard key={key} label={label} value={data[key]} color={color} />
         ))}
       </div>
 
-      {/* Factors */}
+      {/* Positive factors */}
       {data.positives?.length > 0 && (
-        <div>
-          <h3 className="text-slate-400 text-xs uppercase tracking-widest mb-2">What went well</h3>
-          <ul className="space-y-2">
-            {data.positives.map((f, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-200">
-                <span className="text-emerald-400 mt-0.5">+</span>
-                <span>{f}</span>
-              </li>
-            ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{
+            fontFamily: SANS, fontSize: 9, fontWeight: 500,
+            letterSpacing: "0.12em", color: C.label,
+          }}>
+            WHAT WENT WELL
+          </span>
+          <ul style={{ display: "flex", flexDirection: "column", gap: 4, margin: 0, padding: 0 }}>
+            {data.positives.map((f, i) => <FactorItem key={i} text={f} positive />)}
           </ul>
         </div>
       )}
 
+      {/* Negative factors */}
       {data.negatives?.length > 0 && (
-        <div>
-          <h3 className="text-slate-400 text-xs uppercase tracking-widest mb-2">What to improve</h3>
-          <ul className="space-y-2">
-            {data.negatives.map((f, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-200">
-                <span className="text-red-400 mt-0.5">−</span>
-                <span>{f}</span>
-              </li>
-            ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{
+            fontFamily: SANS, fontSize: 9, fontWeight: 500,
+            letterSpacing: "0.12em", color: C.label,
+          }}>
+            WHAT TO IMPROVE
+          </span>
+          <ul style={{ display: "flex", flexDirection: "column", gap: 4, margin: 0, padding: 0 }}>
+            {data.negatives.map((f, i) => <FactorItem key={i} text={f} positive={false} />)}
           </ul>
         </div>
       )}
@@ -115,264 +312,517 @@ function LastNight({ data }) {
 }
 
 // ── Trends view ───────────────────────────────────────────────────────────────
-function Trends({ history }) {
-  const chartData = history
+const TT_STYLE = {
+  background: "#0d1117",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: 8,
+  color: "rgba(255,255,255,0.8)",
+  fontFamily: "'Inter', sans-serif",
+  fontSize: 12,
+};
+
+function Trends({ scores, loading }) {
+  if (loading) {
+    return (
+      <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
+        <Skeleton h={12} w="50%" />
+        <Skeleton h={220} radius={8} />
+        <Skeleton h={12} w="50%" />
+        <Skeleton h={180} radius={8} />
+      </div>
+    );
+  }
+
+  const chartData = scores
     .filter(d => d.total_score != null)
-    .map(d => ({
-      date: d.timestamp ? d.timestamp.slice(5, 10) : "",
+    .slice(-30)
+    .map((d, i) => ({
+      date: d.bed_entry ? d.bed_entry.slice(5, 10) : String(i),
       score: Math.round(d.total_score),
-    }))
-    .reverse()
-    .slice(-30);
+      arch: Math.round(d.architecture_score || 0),
+      cont: Math.round(d.continuity_score || 0),
+      brth: Math.round(d.breathing_score || 0),
+      env:  Math.round(d.environment_score || 0),
+    }));
 
   if (chartData.length === 0)
-    return <Placeholder>No trend data yet — log more nights to see trends.</Placeholder>;
+    return <Placeholder>No trend data yet — run the pipeline on a few nights.</Placeholder>;
 
   return (
-    <div className="p-4 space-y-4">
-      <h2 className="text-slate-300 font-medium">Recovery — last {chartData.length} nights</h2>
-      <ResponsiveContainer width="100%" height={260}>
-        <AreaChart data={chartData} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
-          <defs>
-            <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-          <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11 }} />
-          <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 11 }} />
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "none", borderRadius: 8, color: "#e2e8f0" }}
-            formatter={v => [`${v}/100`, "Recovery"]}
-          />
-          <Area
-            type="monotone" dataKey="score"
-            stroke="#3b82f6" strokeWidth={2}
-            fill="url(#scoreGrad)" dot={{ r: 3, fill: "#3b82f6" }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+    <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Recovery area chart */}
+      <div>
+        <p style={{
+          fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+          color: C.label, marginBottom: 12,
+        }}>
+          RECOVERY — LAST {chartData.length} NIGHTS
+        </p>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+            <defs>
+              <linearGradient id="tealGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={C.teal} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={C.teal} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="date"
+              tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+              tickLine={false} axisLine={false} />
+            <YAxis domain={[0, 100]}
+              tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+              tickLine={false} axisLine={false} />
+            <ReferenceLine y={75} stroke={C.muted} strokeDasharray="4 4"
+              label={{ value: "target", position: "insideTopRight", fill: C.muted, fontSize: 9, fontFamily: SANS }} />
+            <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}/100`, "Recovery"]} />
+            <Area type="basis" dataKey="score"
+              stroke={C.teal} strokeWidth={2} fill="url(#tealGrad)" dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
 
-      {/* Components trend */}
-      <h2 className="text-slate-300 font-medium mt-2">Component scores</h2>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart
-          data={history
-            .filter(d => d.architecture_score != null)
-            .map(d => ({
-              date: d.timestamp?.slice(5, 10),
-              arch: Math.round(d.architecture_score),
-              cont: Math.round(d.continuity_score),
-              brth: Math.round(d.breathing_score),
-              env:  Math.round(d.environment_score),
-            }))
-            .reverse()
-            .slice(-30)
-          }
-          margin={{ top: 5, right: 8, left: -20, bottom: 0 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-          <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 10 }} />
-          <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 10 }} />
-          <Tooltip contentStyle={{ background: "#1e293b", border: "none", borderRadius: 8, color: "#e2e8f0" }} />
-          <Line type="monotone" dataKey="arch" stroke="#818cf8" strokeWidth={1.5} dot={false} name="Architecture" />
-          <Line type="monotone" dataKey="cont" stroke="#34d399" strokeWidth={1.5} dot={false} name="Continuity" />
-          <Line type="monotone" dataKey="brth" stroke="#fb923c" strokeWidth={1.5} dot={false} name="Breathing" />
-          <Line type="monotone" dataKey="env"  stroke="#a78bfa" strokeWidth={1.5} dot={false} name="Environment" />
-        </LineChart>
-      </ResponsiveContainer>
+      {/* Component lines */}
+      <div>
+        <p style={{
+          fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+          color: C.label, marginBottom: 12,
+        }}>
+          COMPONENT SCORES
+        </p>
+        <ResponsiveContainer width="100%" height={210}>
+          <LineChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+            <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+            <XAxis dataKey="date"
+              tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+              tickLine={false} axisLine={false} />
+            <YAxis domain={[0, 100]}
+              tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+              tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={TT_STYLE} />
+            <Legend
+              iconType="plainline"
+              wrapperStyle={{ fontFamily: SANS, fontSize: 11, color: C.body, paddingTop: 10 }}
+            />
+            <Line type="basis" dataKey="arch" stroke={C.arch} strokeWidth={1.5} dot={false} name="Architecture" />
+            <Line type="basis" dataKey="cont" stroke={C.cont} strokeWidth={1.5} dot={false} name="Continuity" />
+            <Line type="basis" dataKey="brth" stroke={C.brth} strokeWidth={1.5} dot={false} name="Breathing" />
+            <Line type="basis" dataKey="env"  stroke={C.env}  strokeWidth={1.5} dot={false} name="Environment" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
 
 // ── Sleep Breakdown view ──────────────────────────────────────────────────────
-function SleepBreakdown({ data }) {
+const STAGE_COLORS = {
+  awake: "rgba(255,255,255,0.28)",
+  light: "#4a90d9",
+  deep:  "#7b8ff7",
+  rem:   "#00e5a0",
+};
+
+function classifyStage(br, mp) {
+  if (mp > 0.3)                         return "awake";
+  if (mp < 0.10 && br >= 10 && br < 13.8) return "deep";
+  if (mp < 0.08 && br > 14.8)           return "rem";
+  return "light";
+}
+
+function SleepBreakdown({ data, loading }) {
+  if (loading) {
+    return (
+      <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
+        <Skeleton h={12} w="40%" />
+        <Skeleton h={40} radius={6} />
+        <Skeleton h={130} radius={8} />
+        <Skeleton h={100} radius={8} />
+      </div>
+    );
+  }
+
   if (!data || !data.csi?.length)
     return <Placeholder>No detailed sleep data available yet.</Placeholder>;
 
-  // Approximate stages from CSI data
-  const totalSamples = data.csi.length;
-  const stages = data.csi.map(row => {
-    const br = row.br ?? 14;
-    const mp = row.mp ?? 0.1;
-    if (mp > 0.3) return "awake";
-    if (mp < 0.10 && br >= 10.5 && br <= 14.5) return "deep";
-    if (mp < 0.08 && (br > 13.5)) return "rem";
-    return "light";
-  });
+  // Classify then smooth with 10-window mode filter
+  const rawStages = data.csi.map(row => classifyStage(row.br ?? 14, row.mp ?? 0.1));
+  const stages = modeFilter(rawStages, 10);
 
-  const stageColours = { awake: "#475569", light: "#3b82f6", deep: "#1d4ed8", rem: "#7c3aed" };
+  // Collapse to runs for efficient rendering
+  const runs = [];
+  let cur = { stage: stages[0], count: 1 };
+  for (let i = 1; i < stages.length; i++) {
+    if (stages[i] === cur.stage) { cur.count++; }
+    else { runs.push({ ...cur }); cur = { stage: stages[i], count: 1 }; }
+  }
+  runs.push({ ...cur });
 
-  // CO2 sparkline data
-  const co2Data = (data.sensors || []).map((s, i) => ({
-    i,
-    co2: Math.round(s.co2_ppm),
-    temp: parseFloat(s.temperature?.toFixed(1)),
-  }));
+  // Hour-mark labels along the timeline
+  const bedEntry  = data.bed_entry ? new Date(data.bed_entry) : null;
+  const bedExit   = data.bed_exit  ? new Date(data.bed_exit)  : null;
+  const durationMs = bedEntry && bedExit ? bedExit - bedEntry : null;
+
+  const hourMarks = [];
+  if (bedEntry && durationMs) {
+    for (let h = 1; h <= 12; h++) {
+      const ms = h * 3_600_000;
+      if (ms >= durationMs) break;
+      hourMarks.push({
+        pct: (ms / durationMs) * 100,
+        label: new Date(bedEntry.getTime() + ms)
+          .toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+      });
+    }
+  }
+
+  // Sensor data — downsample to ~100 points for smooth rendering
+  const rawSensors = data.sensors || [];
+  const step = rawSensors.length > 150 ? Math.floor(rawSensors.length / 100) : 1;
+  const sensorData = rawSensors
+    .filter((_, i) => i % step === 0)
+    .map((s, i) => ({
+      i,
+      co2:      Math.round(s.co2_ppm ?? 700),
+      temp:     parseFloat((s.temperature ?? 20).toFixed(1)),
+      humidity: parseFloat((s.humidity ?? 50).toFixed(1)),
+      voc:      Math.round(s.voc_index ?? 100),
+    }));
+  const co2Max = sensorData.length ? Math.max(...sensorData.map(d => d.co2), 1200) : 2000;
 
   return (
-    <div className="p-4 space-y-5">
-      <h2 className="text-slate-300 font-medium">Sleep stages</h2>
+    <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Hypnogram bar */}
+      <div>
+        <p style={{
+          fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+          color: C.label, marginBottom: 10,
+        }}>
+          SLEEP STAGES
+        </p>
 
-      {/* Stage timeline bar */}
-      <div className="rounded-lg overflow-hidden h-10 flex">
-        {stages.map((s, i) => (
-          <div
-            key={i}
-            style={{ flex: 1, background: stageColours[s] ?? "#475569" }}
-            title={s}
-          />
-        ))}
-      </div>
+        <div style={{
+          display: "flex", height: 40, borderRadius: 6, overflow: "hidden",
+          border: `1px solid ${C.border}`,
+        }}>
+          {runs.map((run, i) => (
+            <div key={i} title={run.stage} style={{
+              flex: run.count,
+              background: STAGE_COLORS[run.stage] ?? C.muted,
+            }} />
+          ))}
+        </div>
 
-      {/* Legend */}
-      <div className="flex gap-4 text-xs text-slate-400">
-        {Object.entries(stageColours).map(([label, colour]) => (
-          <div key={label} className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-sm" style={{ background: colour }} />
-            <span className="capitalize">{label}</span>
+        {/* Hour marks */}
+        {hourMarks.length > 0 && (
+          <div style={{ position: "relative", height: 18, marginTop: 3 }}>
+            {hourMarks.map((m, i) => (
+              <span key={i} style={{
+                position: "absolute", left: `${m.pct}%`, transform: "translateX(-50%)",
+                fontFamily: MONO, fontSize: 9, color: C.muted, whiteSpace: "nowrap",
+              }}>
+                {m.label}
+              </span>
+            ))}
           </div>
-        ))}
+        )}
+
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+          {Object.entries(STAGE_COLORS).map(([label, color]) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />
+              <span style={{
+                fontFamily: SANS, fontSize: 10, color: C.muted, textTransform: "capitalize",
+              }}>
+                {label}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* CO2 sparkline */}
-      {co2Data.length > 0 && (
-        <>
-          <h3 className="text-slate-400 text-xs uppercase tracking-widest">CO₂ (ppm)</h3>
-          <ResponsiveContainer width="100%" height={100}>
-            <AreaChart data={co2Data} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
+      {/* CO2 chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            CO₂ (PPM)
+          </p>
+          <ResponsiveContainer width="100%" height={140}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="co2Grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                  <stop offset="5%"  stopColor={C.amber} stopOpacity={0.20} />
+                  <stop offset="95%" stopColor={C.amber} stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
-              <Tooltip
-                contentStyle={{ background: "#1e293b", border: "none", borderRadius: 8, color: "#e2e8f0" }}
-                formatter={v => [`${v} ppm`, "CO₂"]}
-              />
-              <Area type="monotone" dataKey="co2" stroke="#f97316" strokeWidth={1.5} fill="url(#co2Grad)" dot={false} />
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={[350, co2Max + 150]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <ReferenceLine y={1000} stroke={C.amber} strokeDasharray="4 3"
+                label={{ value: "safe limit", position: "insideTopLeft", fill: C.amber, fontSize: 9, fontFamily: SANS }} />
+              <ReferenceLine y={1500} stroke={C.red} strokeDasharray="4 3"
+                label={{ value: "poor", position: "insideTopLeft", fill: C.red, fontSize: 9, fontFamily: SANS }} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v} ppm`, "CO₂"]} />
+              <Area type="basis" dataKey="co2"
+                stroke={C.amber} strokeWidth={1.5} fill="url(#co2Grad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+      )}
 
-          <h3 className="text-slate-400 text-xs uppercase tracking-widest">Temperature (°C)</h3>
-          <ResponsiveContainer width="100%" height={80}>
-            <AreaChart data={co2Data} margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
+      {/* Temperature chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            TEMPERATURE (°C)
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="tempGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                  <stop offset="5%"  stopColor={C.blue} stopOpacity={0.22} />
+                  <stop offset="95%" stopColor={C.blue} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <YAxis tick={{ fill: "#64748b", fontSize: 10 }} domain={["auto", "auto"]} />
-              <Tooltip
-                contentStyle={{ background: "#1e293b", border: "none", borderRadius: 8, color: "#e2e8f0" }}
-                formatter={v => [`${v}°C`, "Temp"]}
-              />
-              <Area type="monotone" dataKey="temp" stroke="#06b6d4" strokeWidth={1.5} fill="url(#tempGrad)" dot={false} />
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={["auto", "auto"]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}°C`, "Temp"]} />
+              <Area type="basis" dataKey="temp"
+                stroke={C.blue} strokeWidth={1.5} fill="url(#tempGrad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
-        </>
+        </div>
+      )}
+
+      {/* Humidity chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            HUMIDITY (%)
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="humGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#a78bfa" stopOpacity={0.22} />
+                  <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={["auto", "auto"]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}%`, "Humidity"]} />
+              <Area type="basis" dataKey="humidity"
+                stroke="#a78bfa" strokeWidth={1.5} fill="url(#humGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* VOC chart */}
+      {sensorData.length > 0 && (
+        <div style={{
+          background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+          padding: "14px 4px 8px",
+        }}>
+          <p style={{
+            fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+            color: C.label, marginBottom: 10, paddingLeft: 14,
+          }}>
+            VOC INDEX
+          </p>
+          <ResponsiveContainer width="100%" height={110}>
+            <AreaChart data={sensorData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="vocGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#34d399" stopOpacity={0.20} />
+                  <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+              <YAxis domain={["auto", "auto"]}
+                tick={{ fill: C.muted, fontSize: 10, fontFamily: SANS }}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v}`, "VOC Index"]} />
+              <Area type="basis" dataKey="voc"
+                stroke="#34d399" strokeWidth={1.5} fill="url(#vocGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
       )}
     </div>
   );
 }
 
-// ── Log view ──────────────────────────────────────────────────────────────────
-function LogView({ history }) {
-  const entries = history.filter(d => d.recovery != null);
+// ── Log history view ──────────────────────────────────────────────────────────
+function LogView({ history, loading }) {
+  if (loading) {
+    return (
+      <div className="fade-in" style={{ padding: "16px 0" }}>
+        <Skeleton h={12} w="40%" style={{ margin: "0 16px 16px" }} />
+        {[0, 1, 2, 3, 4].map(i => (
+          <div key={i}>
+            <Skeleton h={50} radius={0} style={{ margin: "0 16px" }} />
+            <div style={{ height: 1, background: C.border, margin: "0 16px" }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
-  if (entries.length === 0)
-    return <Placeholder>No morning log entries yet.</Placeholder>;
+  const entries = history.filter(d => d.recovery != null);
+  if (entries.length === 0) return <Placeholder>No morning log entries yet.</Placeholder>;
 
   return (
-    <div className="p-4 space-y-3">
-      <h2 className="text-slate-300 font-medium">Morning log history</h2>
-      {entries.map(e => (
-        <div key={e.id} className="bg-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-slate-400 text-xs">
+    <div className="fade-in" style={{ padding: "16px 0" }}>
+      <p style={{
+        fontFamily: SANS, fontSize: 10, fontWeight: 500, letterSpacing: "0.12em",
+        color: C.label, padding: "0 16px 12px",
+      }}>
+        MORNING LOG
+      </p>
+      {entries.map((e, idx) => (
+        <div key={e.id}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "12px 16px",
+            background: idx % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent",
+          }}>
+            <span style={{
+              fontFamily: MONO, fontSize: 12, color: C.body,
+              minWidth: 72, flexShrink: 0,
+            }}>
               {e.timestamp ? e.timestamp.slice(0, 10) : "—"}
             </span>
+
+            <div style={{ flex: 1, display: "flex", gap: 10 }}>
+              {[["REC", e.recovery], ["NRG", e.energy], ["CLR", e.clarity], ["MOOD", e.mood]].map(([lbl, val]) => (
+                <div key={lbl} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 26 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 13, color: "rgba(255,255,255,0.8)" }}>
+                    {val ?? "—"}
+                  </span>
+                  <span style={{
+                    fontFamily: SANS, fontSize: 8, color: C.muted,
+                    letterSpacing: "0.06em",
+                  }}>
+                    {lbl}
+                  </span>
+                </div>
+              ))}
+            </div>
+
             {e.total_score != null && (
-              <span className={`text-sm font-semibold tabular-nums ${scoreColour(e.total_score)}`}>
-                {Math.round(e.total_score)}/100
+              <span style={{
+                fontFamily: MONO, fontWeight: 300, fontSize: 15,
+                color: scoreAccent(e.total_score),
+              }}>
+                {Math.round(e.total_score)}
               </span>
             )}
+
+            {e.notes && (
+              <span style={{ color: C.muted, fontSize: 10 }} title={e.notes}>·</span>
+            )}
           </div>
-          <div className="grid grid-cols-4 gap-2 text-center">
-            {[
-              ["Rec", e.recovery],
-              ["Energy", e.energy],
-              ["Clarity", e.clarity],
-              ["Mood", e.mood],
-            ].map(([label, val]) => (
-              <div key={label}>
-                <div className="text-lg font-semibold text-slate-200">{val ?? "—"}</div>
-                <div className="text-xs text-slate-500">{label}</div>
-              </div>
-            ))}
-          </div>
-          {e.notes && (
-            <p className="text-xs text-slate-400 italic border-t border-slate-700 pt-2">
-              {e.notes}
-            </p>
-          )}
+          <div style={{ height: 1, background: C.border, margin: "0 16px" }} />
         </div>
       ))}
     </div>
   );
 }
 
-// ── Shared placeholder ────────────────────────────────────────────────────────
-function Placeholder({ children }) {
-  return (
-    <div className="flex items-center justify-center h-64 px-8 text-center">
-      <p className="text-slate-500 text-sm">{children}</p>
-    </div>
-  );
-}
+// ── Tab bar & root ────────────────────────────────────────────────────────────
+const TABS = ["Last Night", "Trends", "Sleep", "Log"];
 
-// ── Tab bar ───────────────────────────────────────────────────────────────────
-const TABS = [
-  { label: "Last Night", icon: "🌙" },
-  { label: "Trends",     icon: "📈" },
-  { label: "Sleep",      icon: "💤" },
-  { label: "Log",        icon: "📋" },
-];
-
-// ── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState(0);
-  const { data: latest } = useLatest();
-  const history = useHistory();
+  const { data: latest,  loading: latestLoading  } = useLatest();
+  const { data: scores,  loading: scoresLoading  } = useScores();
+  const { data: history, loading: historyLoading } = useHistory();
 
   const views = [
-    <LastNight key="ln" data={latest} />,
-    <Trends key="tr" history={history} />,
-    <SleepBreakdown key="sb" data={latest} />,
-    <LogView key="lv" history={history} />,
+    <LastNight    key="ln" data={latest}  loading={latestLoading}  />,
+    <Trends       key="tr" scores={scores} loading={scoresLoading}  />,
+    <SleepBreakdown key="sb" data={latest} loading={latestLoading}  />,
+    <LogView      key="lv" history={history} loading={historyLoading} />,
   ];
 
   return (
-    <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col max-w-lg mx-auto">
-      <div className="flex-1 overflow-y-auto pb-20">{views[tab]}</div>
+    <div style={{
+      height: "100dvh",
+      background: C.bg,
+      color: "rgba(255,255,255,0.85)",
+      display: "flex", flexDirection: "column",
+      maxWidth: 430, margin: "0 auto",
+      overflow: "hidden",
+    }}>
+      {/* Scrollable content — key forces remount + fade-in on tab switch */}
+      <div key={tab} style={{ flex: 1, overflowY: "auto" }}>
+        {views[tab]}
+      </div>
 
-      {/* Bottom tab bar */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-slate-900 border-t border-slate-800 flex">
-        {TABS.map((t, i) => (
-          <button
-            key={t.label}
-            onClick={() => setTab(i)}
-            className={`flex-1 flex flex-col items-center py-3 gap-0.5 text-xs transition-colors
-              ${tab === i ? "text-blue-400" : "text-slate-500"}`}
-          >
-            <span className="text-lg leading-none">{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+      {/* Tab bar — 60 px, teal underline on active tab */}
+      <nav style={{
+        height: 60, flexShrink: 0,
+        background: C.card,
+        borderTop: `1px solid ${C.border}`,
+        display: "flex",
+      }}>
+        {TABS.map((label, i) => {
+          const active = tab === i;
+          return (
+            <button
+              key={label}
+              onClick={() => setTab(i)}
+              style={{
+                flex: 1, display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                background: "none", border: "none", cursor: "pointer",
+                padding: 0, position: "relative",
+                color: active ? C.teal : "rgba(255,255,255,0.35)",
+                transition: "color 150ms ease",
+              }}
+            >
+              {active && (
+                <div style={{
+                  position: "absolute", top: 0, left: "20%", right: "20%",
+                  height: 2, background: C.teal, borderRadius: "0 0 2px 2px",
+                }} />
+              )}
+              <span style={{
+                fontFamily: SANS,
+                fontSize: 11,
+                fontWeight: active ? 500 : 400,
+                letterSpacing: "0.02em",
+              }}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
       </nav>
     </div>
   );
