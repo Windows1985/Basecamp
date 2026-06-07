@@ -55,6 +55,19 @@ def migrate_schema(db_path):
                 state TEXT NOT NULL DEFAULT 'IDLE',
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sleep_stages (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id    INTEGER NOT NULL,
+                window_start  REAL NOT NULL,
+                window_end    REAL NOT NULL,
+                stage         TEXT NOT NULL,
+                probable_rem  INTEGER DEFAULT 0,
+                heuristic_stage TEXT NOT NULL,
+                ml_stage      TEXT,
+                ml_confidence REAL,
+                source        TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sleep_sessions(id)
+            );
             """
         )
         conn.commit()

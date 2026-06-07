@@ -28,13 +28,14 @@ def run_pipeline(session_id=None, db_path=None):
 
     summary = {
         "session_id": None,
-        "features": None,
-        "scores": None,
-        "positives": [],
-        "negatives": [],
-        "anomaly": None,
-        "report": None,
-        "errors": [],
+        "features":   None,
+        "staging":    None,
+        "scores":     None,
+        "positives":  [],
+        "negatives":  [],
+        "anomaly":    None,
+        "report":     None,
+        "errors":     [],
     }
 
     # ---- Step 1: Identify session ----------------------------------------
@@ -86,6 +87,33 @@ def run_pipeline(session_id=None, db_path=None):
     except Exception as e:
         summary["errors"].append(f"Step 2 (features): {e}")
         print(f"[2/7] FAILED: {e}")
+        traceback.print_exc()
+
+    # ---- Step 2.5: Sleep stage classification --------------------------------
+    try:
+        from pipeline.staging import classify_session
+        staging = classify_session(session_id, db_path)
+        if staging:
+            # Merge real staging metrics into features (overrides heuristic placeholders)
+            summary["features"].update({
+                "deep_sleep_proportion":       staging["deep_sleep_proportion"],
+                "rem_proportion":              staging["rem_proportion"],
+                "awakening_count":             staging["awakening_count"],
+                "sleep_onset_latency_minutes": staging["sleep_onset_latency_minutes"],
+                "sleep_efficiency":            staging["sleep_efficiency"],
+            })
+            summary["staging"] = staging
+            print(
+                f"[2.5/7] Staging: deep={staging['deep_sleep_proportion']*100:.0f}%  "
+                f"rem≈{staging['rem_proportion_estimate']*100:.0f}%  "
+                f"awakenings={staging['awakening_count']}  "
+                f"onset={staging['sleep_onset_latency_minutes']:.0f}min"
+            )
+        else:
+            print("[2.5/7] Staging skipped (no CSI data)")
+    except Exception as e:
+        summary["errors"].append(f"Step 2.5 (staging): {e}")
+        print(f"[2.5/7] FAILED: {e}")
         traceback.print_exc()
 
     # ---- Step 3: Recovery scoring ----------------------------------------
@@ -150,7 +178,7 @@ def run_pipeline(session_id=None, db_path=None):
         print(f"[6/7] FAILED: {e}")
         traceback.print_exc()
 
-    # ---- Step 7: Retrain anomaly model if >= 7 sessions -------------------
+    # ---- Step 7: Retrain models if enough sessions exist ------------------
     try:
         conn = get_connection(db_path)
         try:
@@ -160,6 +188,7 @@ def run_pipeline(session_id=None, db_path=None):
         finally:
             conn.close()
 
+        # Anomaly model: retrain after >= 7 sessions
         if session_count >= 7:
             from pipeline.anomaly import train_baseline
             trained = train_baseline(db_path)
@@ -169,6 +198,15 @@ def run_pipeline(session_id=None, db_path=None):
                 print(f"[7/7] Anomaly model training skipped (< 7 sessions with scores)")
         else:
             print(f"[7/7] Anomaly model training skipped ({session_count} sessions total, need 7)")
+
+        # Staging model: retrain at >= 14 sessions and every 7 thereafter
+        from server.config import STAGING_MIN_NIGHTS_ML
+        if session_count >= STAGING_MIN_NIGHTS_ML and session_count % 7 == 0:
+            from pipeline.staging import retrain_staging_model
+            if retrain_staging_model(db_path):
+                print(f"[7/7] Staging model retrained on {session_count} sessions")
+            else:
+                print("[7/7] Staging model retrain skipped (insufficient staged data)")
     except Exception as e:
         summary["errors"].append(f"Step 7 (retrain): {e}")
         print(f"[7/7] FAILED: {e}")
