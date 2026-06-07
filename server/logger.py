@@ -14,7 +14,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.config import (
     DB_PATH, I2C_BUS, SHT40_ADDR, BH1750_ADDR, SCD40_ADDR, SGP40_ADDR,
-    MOCK_HARDWARE,
+    MOCK_HARDWARE, WATCHDOG_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS,
 )
 from server.db import init_db, get_connection
 
@@ -102,12 +102,15 @@ def _mock_readings():
     else:
         light = random.uniform(0, 0.5)
 
+    import random as _r
+    max_lux = round(light + _r.uniform(0, light * 0.2 + 0.1), 2)
     return {
         "temperature": round(_mock["temp"], 2),
         "humidity": round(_mock["humidity"], 2),
         "co2_ppm": round(_mock["co2"], 1),
         "voc_index": round(_mock["voc"], 1),
         "light_lux": round(light, 2),
+        "max_lux": max_lux,
     }
 
 
@@ -237,6 +240,7 @@ def _read_all_sensors():
         "co2_ppm": None,
         "voc_index": None,
         "light_lux": None,
+        "max_lux": None,
     }
 
     if MOCK_HARDWARE or not _SMBUS_AVAILABLE or _bus is None:
@@ -271,11 +275,30 @@ def _read_all_sensors():
     return results
 
 
+def _write_heartbeat():
+    try:
+        conn = get_connection(DB_PATH)
+        try:
+            conn.execute(
+                """INSERT INTO service_heartbeats (service_name, last_heartbeat, status)
+                   VALUES ('logger', ?, 'running')
+                   ON CONFLICT(service_name) DO UPDATE
+                   SET last_heartbeat=excluded.last_heartbeat, status=excluded.status""",
+                (time.time(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.debug(f"Heartbeat write failed: {e}")
+
+
 def _write_reading(readings):
     ts = datetime.utcnow().isoformat()
     sql = """
-        INSERT INTO sensor_readings (timestamp, temperature, humidity, co2_ppm, voc_index, light_lux)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sensor_readings
+        (timestamp, temperature, humidity, co2_ppm, voc_index, light_lux, max_lux)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """
     params = (
         ts,
@@ -284,6 +307,7 @@ def _write_reading(readings):
         readings["co2_ppm"],
         readings["voc_index"],
         readings["light_lux"],
+        readings.get("max_lux"),
     )
     for attempt in range(2):
         try:
@@ -299,6 +323,24 @@ def _write_reading(readings):
             if attempt == 0:
                 time.sleep(5)
     log.error("DB write failed after retry, dropping reading")
+
+
+def _collect_bh1750_1hz(bus, n_samples=30):
+    """
+    Collect n_samples BH1750 readings at ~1 Hz.
+    Returns (mean_lux, max_lux). Falls back to a single reading on error.
+    """
+    readings = []
+    for _ in range(n_samples):
+        try:
+            lux = _read_bh1750(bus)
+            readings.append(lux)
+        except Exception as e:
+            log.debug(f"BH1750 1Hz sample error: {e}")
+        time.sleep(1.0)
+    if not readings:
+        return None, None
+    return round(sum(readings) / len(readings), 2), round(max(readings), 2)
 
 
 def run():
@@ -319,14 +361,46 @@ def run():
         log.info(msg)
         print(msg)
 
+    try:
+        import sdnotify as _sdnotify
+        _notifier = _sdnotify.SystemdNotifier()
+    except ImportError:
+        _notifier = None
+
+    last_watchdog = time.monotonic()
+    last_heartbeat = time.monotonic()
+
     while _running:
+        # --- BH1750 1Hz collection (takes ~30s, matches the loop cadence) ---
+        if not MOCK_HARDWARE and _SMBUS_AVAILABLE and _bus is not None:
+            mean_lux, max_lux = _collect_bh1750_1hz(_bus, n_samples=30)
+        else:
+            mean_lux, max_lux = None, None
+            # In mock mode still wait the 30-second window
+            for _ in range(30):
+                if not _running:
+                    break
+                time.sleep(1)
+
         readings = _read_all_sensors()
+        # Overwrite light_lux with the mean from 1Hz collection if available
+        if mean_lux is not None:
+            readings["light_lux"] = mean_lux
+            readings["max_lux"] = max_lux
         _write_reading(readings)
         log.debug(f"Reading: {readings}")
-        for _ in range(30):
-            if not _running:
-                break
-            time.sleep(1)
+
+        now_mono = time.monotonic()
+        if now_mono - last_watchdog >= WATCHDOG_INTERVAL_SECONDS:
+            last_watchdog = now_mono
+            try:
+                if _notifier:
+                    _notifier.notify("WATCHDOG=1")
+            except Exception:
+                pass
+        if now_mono - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+            last_heartbeat = now_mono
+            _write_heartbeat()
 
     log.info("Sensor logger stopped")
 

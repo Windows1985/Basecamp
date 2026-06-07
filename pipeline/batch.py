@@ -5,7 +5,8 @@ Triggered by the presence watcher after bed exit is detected.
 import os
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.db import get_connection, get_latest_session_id
@@ -179,8 +180,35 @@ def run_pipeline(session_id=None, db_path=None):
             print(f"  - {err}")
     else:
         print("\nPipeline completed successfully.")
+        _cleanup_old_audio(db_path)
 
     return summary
+
+
+def _cleanup_old_audio(db_path):
+    """
+    Delete .opus audio files older than AUDIO_RETENTION_DAYS.
+    SQLite rows are kept; only the actual files are removed.
+    """
+    try:
+        from server.config import AUDIO_RETENTION_DAYS
+        cutoff = datetime.utcnow() - timedelta(days=AUDIO_RETENTION_DAYS)
+        audio_dir = Path(db_path).parent / "audio"
+        if not audio_dir.exists():
+            return
+        deleted = 0
+        for f in audio_dir.glob("*.opus"):
+            try:
+                mtime = datetime.utcfromtimestamp(f.stat().st_mtime)
+                if mtime < cutoff:
+                    f.unlink()
+                    deleted += 1
+            except Exception:
+                pass
+        if deleted:
+            print(f"[cleanup] Removed {deleted} audio file(s) older than {AUDIO_RETENTION_DAYS} days")
+    except Exception as e:
+        print(f"[cleanup] Audio cleanup error: {e}")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
     humidity REAL,
     co2_ppm REAL,
     voc_index REAL,
-    light_lux REAL
+    light_lux REAL,
+    max_lux REAL
 );
 
 CREATE TABLE IF NOT EXISTS csi_readings (
@@ -22,7 +23,8 @@ CREATE TABLE IF NOT EXISTS radar_events (
     event_type TEXT,
     presence INTEGER,
     still_distance REAL,
-    moving_distance REAL
+    moving_distance REAL,
+    pi_timestamp REAL
 );
 
 CREATE TABLE IF NOT EXISTS audio_chunks (
@@ -30,14 +32,17 @@ CREATE TABLE IF NOT EXISTS audio_chunks (
     timestamp TEXT NOT NULL,
     tier TEXT,
     duration_seconds REAL,
-    file_path TEXT
+    file_path TEXT,
+    pi_timestamp REAL
 );
 
 CREATE TABLE IF NOT EXISTS sleep_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     bed_entry TEXT NOT NULL,
     bed_exit TEXT,
-    duration_hours REAL
+    duration_hours REAL,
+    status TEXT DEFAULT 'COMPLETE',
+    created_at REAL
 );
 
 CREATE TABLE IF NOT EXISTS morning_log (
@@ -74,5 +79,18 @@ CREATE TABLE IF NOT EXISTS csi_variance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     node_id TEXT NOT NULL,
-    variance_value REAL NOT NULL
+    variance_value REAL NOT NULL,
+    pi_timestamp REAL
+);
+
+CREATE TABLE IF NOT EXISTS service_heartbeats (
+    service_name TEXT PRIMARY KEY,
+    last_heartbeat REAL,
+    status TEXT
+);
+
+CREATE TABLE IF NOT EXISTS daemon_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    state TEXT NOT NULL DEFAULT 'IDLE',
+    updated_at REAL NOT NULL
 );

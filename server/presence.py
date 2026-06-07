@@ -16,6 +16,8 @@ from enum import Enum
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.config import (
     DB_PATH, RADAR_SERIAL_PORT, RADAR_BAUD_RATE, MIN_SLEEP_HOURS, MOCK_HARDWARE,
+    WAKE_ABSENCE_MINUTES, WAKE_EARLIEST_HOUR,
+    WATCHDOG_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS,
 )
 from server.db import init_db, get_connection
 
@@ -137,22 +139,43 @@ class MockRadar:
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
-def _write_radar_event(event_type, presence, still_dist, moving_dist, ts=None):
+def _write_radar_event(event_type, presence, still_dist, moving_dist, ts=None, pi_ts=None):
     if ts is None:
         ts = datetime.utcnow().isoformat()
+    if pi_ts is None:
+        pi_ts = time.monotonic()
     try:
         conn = get_connection(DB_PATH)
         try:
             conn.execute(
-                """INSERT INTO radar_events (timestamp, event_type, presence, still_distance, moving_distance)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (ts, event_type, int(bool(presence)), still_dist, moving_dist),
+                """INSERT INTO radar_events
+                   (timestamp, event_type, presence, still_distance, moving_distance, pi_timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (ts, event_type, int(bool(presence)), still_dist, moving_dist, pi_ts),
             )
             conn.commit()
         finally:
             conn.close()
     except Exception as e:
         log.error(f"DB write radar_event failed: {e}")
+
+
+def _write_heartbeat():
+    try:
+        conn = get_connection(DB_PATH)
+        try:
+            conn.execute(
+                """INSERT INTO service_heartbeats (service_name, last_heartbeat, status)
+                   VALUES ('presence', ?, 'running')
+                   ON CONFLICT(service_name) DO UPDATE
+                   SET last_heartbeat=excluded.last_heartbeat, status=excluded.status""",
+                (time.time(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.debug(f"Heartbeat write failed: {e}")
 
 
 def _write_bed_entry(ts):
@@ -243,11 +266,21 @@ def run():
         if not _running:
             return
 
-    state              = State.ABSENT
-    presence_count     = 0
-    absent_count       = 0
-    in_bed_since       = None
-    buf                = b""
+    state                = State.ABSENT
+    presence_count       = 0
+    absent_count         = 0
+    in_bed_since         = None
+    bed_entry_time       = None   # wall-clock time of bed entry
+    possible_exit_since  = None   # monotonic time when POSSIBLE_EXIT started
+    buf                  = b""
+    last_watchdog        = time.monotonic()
+    last_heartbeat       = time.monotonic()
+
+    try:
+        import sdnotify as _sdnotify
+        _notifier = _sdnotify.SystemdNotifier()
+    except ImportError:
+        _notifier = None
 
     while _running:
         # --- Read one frame ---------------------------------------------------
@@ -271,9 +304,23 @@ def run():
                 continue
 
         ts = datetime.utcnow().isoformat()
+        pi_ts = time.monotonic()
 
         # Write raw reading
-        _write_radar_event("reading", present, still_dist, moving_dist, ts)
+        _write_radar_event("reading", present, still_dist, moving_dist, ts, pi_ts)
+
+        # Watchdog + heartbeat
+        now_mono = time.monotonic()
+        if now_mono - last_watchdog >= WATCHDOG_INTERVAL_SECONDS:
+            last_watchdog = now_mono
+            try:
+                if _notifier:
+                    _notifier.notify("WATCHDOG=1")
+            except Exception:
+                pass
+        if now_mono - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+            last_heartbeat = now_mono
+            _write_heartbeat()
 
         # --- Hysteresis counters ----------------------------------------------
         if present:
@@ -293,12 +340,14 @@ def run():
             if absent_count >= ABSENT_CONFIRM:
                 state = State.ABSENT
                 presence_count = 0
+                in_bed_since = None
                 log.info("State → ABSENT (brief presence)")
             elif in_bed_since is None:
                 in_bed_since = time.time()
             elif time.time() - in_bed_since >= IN_BED_SECONDS:
                 state = State.IN_BED
                 bed_ts = datetime.utcnow().isoformat()
+                bed_entry_time = datetime.utcnow()
                 log.info(f"State → IN_BED at {bed_ts}")
                 _write_radar_event("bed_entry", True, still_dist, moving_dist, bed_ts)
                 _write_bed_entry(bed_ts)
@@ -312,30 +361,54 @@ def run():
             if presence_count >= PRESENCE_CONFIRM:
                 state = State.IN_BED
                 absent_count = 0
+                possible_exit_since = None
                 log.info("State → IN_BED (returned)")
-            elif absent_count >= ABSENT_CONFIRM * 2:
-                state = State.EXITED
-                exit_ts = datetime.utcnow().isoformat()
-                log.info(f"State → EXITED at {exit_ts}")
-                _write_radar_event("bed_exit", False, still_dist, moving_dist, exit_ts)
-                session_id, duration = _write_bed_exit(exit_ts)
+            else:
+                if possible_exit_since is None:
+                    possible_exit_since = time.monotonic()
 
-                if duration is not None and duration >= MIN_SLEEP_HOURS:
-                    log.info(f"Sleep duration {duration:.2f}h ≥ {MIN_SLEEP_HOURS}h — triggering pipeline")
-                    subprocess.Popen(
-                        [sys.executable, "pipeline/batch.py"],
-                        cwd=os.path.join(os.path.dirname(__file__), ".."),
-                    )
-                else:
+                absence_minutes = (time.monotonic() - possible_exit_since) / 60.0
+                local_hour = datetime.now().hour
+                sleep_hours = (
+                    (datetime.utcnow() - bed_entry_time).total_seconds() / 3600.0
+                    if bed_entry_time else 0.0
+                )
+                valid_exit = (
+                    absence_minutes >= WAKE_ABSENCE_MINUTES
+                    and local_hour >= WAKE_EARLIEST_HOUR
+                    and sleep_hours >= MIN_SLEEP_HOURS
+                )
+                if valid_exit:
+                    state = State.EXITED
+                    exit_ts = datetime.utcnow().isoformat()
                     log.info(
-                        f"Sleep duration {duration:.2f}h < {MIN_SLEEP_HOURS}h — pipeline not triggered"
+                        f"State → EXITED at {exit_ts} "
+                        f"(absent {absence_minutes:.0f}min, "
+                        f"local {local_hour:02d}:xx, "
+                        f"sleep {sleep_hours:.1f}h)"
                     )
+                    _write_radar_event("bed_exit", False, still_dist, moving_dist, exit_ts)
+                    session_id, duration = _write_bed_exit(exit_ts)
 
-                # Reset to watch for next session
-                state = State.ABSENT
-                presence_count = 0
-                absent_count   = 0
-                in_bed_since   = None
+                    if duration is not None and duration >= MIN_SLEEP_HOURS:
+                        log.info(f"Sleep {duration:.2f}h ≥ {MIN_SLEEP_HOURS}h — triggering pipeline")
+                        subprocess.Popen(
+                            [sys.executable, "pipeline/batch.py"],
+                            cwd=os.path.join(os.path.dirname(__file__), ".."),
+                        )
+                    else:
+                        log.info(
+                            f"Sleep {duration:.2f if duration else 0:.2f}h < {MIN_SLEEP_HOURS}h "
+                            "— pipeline not triggered"
+                        )
+
+                    # Reset to watch for next session
+                    state               = State.ABSENT
+                    presence_count      = 0
+                    absent_count        = 0
+                    in_bed_since        = None
+                    bed_entry_time      = None
+                    possible_exit_since = None
 
     if not MOCK_HARDWARE and ser and ser.is_open:
         ser.close()

@@ -19,8 +19,8 @@ def _build_recommendation(features, scores):
 
     if scores["environment_score"] == worst_score and features["peak_co2"] > 1200:
         return (
-            f"CO2 peaked at {features['peak_co2']:.0f}ppm — try cracking a window "
-            "before bed to improve overnight ventilation."
+            f"CO2 peaked at {features['peak_co2']:.0f}ppm — elevated CO2 may have "
+            "contributed to sleep disruption; try cracking a window before bed."
         )
     if scores["environment_score"] == worst_score and features["mean_temperature"] > 21:
         return (

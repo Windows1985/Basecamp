@@ -14,6 +14,8 @@ WorkingDirectory=/home/pi/basecamp
 ExecStart=/usr/bin/python3 /home/pi/basecamp/server/audio.py
 Restart=on-failure
 RestartSec=10
+WatchdogSec=60
+NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target
