@@ -16,6 +16,52 @@ def init_db(db_path):
     return db_path
 
 
+def migrate_schema(db_path):
+    """
+    Add columns/tables introduced after initial schema.
+    ALTER TABLE errors are swallowed — they fire when a column already exists.
+    """
+    column_migrations = [
+        "ALTER TABLE radar_events ADD COLUMN pi_timestamp REAL",
+        "ALTER TABLE audio_chunks ADD COLUMN pi_timestamp REAL",
+        "ALTER TABLE csi_variance ADD COLUMN pi_timestamp REAL",
+        "ALTER TABLE sensor_readings ADD COLUMN max_lux REAL",
+        "ALTER TABLE sleep_sessions ADD COLUMN status TEXT DEFAULT 'COMPLETE'",
+        "ALTER TABLE sleep_sessions ADD COLUMN created_at REAL",
+    ]
+    conn = sqlite3.connect(db_path)
+    try:
+        for sql in column_migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+        # Default any NULL status rows on sleep_sessions to COMPLETE
+        conn.execute(
+            "UPDATE sleep_sessions SET status='COMPLETE' WHERE status IS NULL"
+        )
+
+        # Ensure new tables exist (idempotent — schema.sql uses IF NOT EXISTS)
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS service_heartbeats (
+                service_name TEXT PRIMARY KEY,
+                last_heartbeat REAL,
+                status TEXT
+            );
+            CREATE TABLE IF NOT EXISTS daemon_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                state TEXT NOT NULL DEFAULT 'IDLE',
+                updated_at REAL NOT NULL
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_connection(db_path):
     """Return a sqlite3 connection with Row factory enabled."""
     conn = sqlite3.connect(db_path)

@@ -79,6 +79,13 @@ The ESP32 nodes do not connect to the Pi via GPIO. They connect over WiFi on the
 Node 1 (bedroom left): bedside table, powered from left wall socket
 Node 2 (bedroom right): ledge at mattress height, powered via 3-5m USB-C cable routed along skirting board from left wall sockets
 
+### Router settings for CSI reliability
+
+On the ASUS router, apply these settings to the RuView-24 2.4GHz SSID:
+- Disable airtime fairness (AirTime Fairness / ATF)
+- Disable Smart Connect (band steering)
+- Disable band steering
+
 ## Power
 
 All sensors run on 3.3V from the Pi's 3.3V pin except the LD2410C radar which requires 5V. The Pi's 3.3V rail can comfortably supply all four I2C sensors and the INMP441 simultaneously. Total current draw from the 3.3V rail is well within the Pi 4's 500mA limit.

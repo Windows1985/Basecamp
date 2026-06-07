@@ -1,0 +1,21 @@
+# Installation:
+#   sudo cp /home/pi/basecamp/systemd/basecamp-sleepmode.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable basecamp-sleepmode
+#   sudo systemctl start basecamp-sleepmode
+
+[Unit]
+Description=Basecamp Sleep Mode State Machine
+After=network.target basecamp-logger.service basecamp-presence.service basecamp-audio.service
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/basecamp
+ExecStart=/usr/bin/python3 /home/pi/basecamp/server/sleepmode.py
+Restart=on-failure
+RestartSec=10
+WatchdogSec=60
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target
