@@ -69,3 +69,10 @@ CREATE TABLE IF NOT EXISTS shap_values (
     feature_name TEXT,
     shap_value REAL
 );
+
+CREATE TABLE IF NOT EXISTS csi_variance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    variance_value REAL NOT NULL
+);
