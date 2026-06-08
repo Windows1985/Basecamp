@@ -1,66 +1,83 @@
 # Basecamp
 
-Basecamp is a fully passive, contactless sleep monitoring system that combines WiFi channel state information, 24GHz mmWave radar, I2S acoustic sensing, and environmental monitoring to estimate sleep quality and produce a personalised recovery score every morning, without wearing anything to bed.
+Basecamp is a passive overnight sleep monitoring system that runs on a Raspberry Pi 4 sitting on a bedside table. It combines WiFi channel state information from two ESP32-S3 nodes, 24GHz mmWave radar, an I2S microphone, and four environmental sensors to estimate sleep quality and produce a personalised recovery score each morning. Nothing touches the body. The system was built to answer a specific question: whether next-day cognitive performance is predictable from raw radio and acoustic signals, and which overnight conditions matter most for a specific person's physiology.
 
-## What it does
+Three sensing modalities work in parallel during the night. Two ESP32-S3 nodes, one on each side of the bed at mattress height, measure how the body disturbs ambient WiFi signals across 56 subcarriers; chest movement during breathing creates measurable phase shifts that the system extracts via bandpass FFT in 30-second windows. A HLK-LD2410C 24GHz mmWave radar tracks bed entry, bed exit, and micro-motion throughout the night but does not output a respiration waveform, so breathing rate comes from CSI and audio only. An INMP441 I2S microphone captures breathing sounds and snoring, and four I2C environmental sensors monitor CO2, VOC, temperature, humidity, and light. The modalities were chosen because they are complementary: CSI measures fine respiratory displacement, radar provides reliable bed presence detection, audio catches acoustic breathing signatures, and environmental sensors capture conditions that affect sleep quality independently of body physiology.
 
-The system runs overnight on a Raspberry Pi 4 inside a custom 3D printed bedside enclosure. Three sensing modalities work in parallel to capture different aspects of sleep. An ESP32-S3 measures how my body disturbs ambient WiFi signals, which encodes breathing rate, movement, and a coarse sleep stage approximation. A HLK-LD2410C mmWave radar tracks presence, bed entry and exit, and micro-motion throughout the night. An INMP441 microphone captures breathing sounds, snoring, and apnea audio signatures. Six environmental sensors monitor CO2, VOC, temperature, humidity, and light.
-
-Nothing runs during the night beyond lightweight data logging. When I get out of bed in the morning, the radar detects the bed exit and triggers a batch processing job that runs the full ML pipeline on the overnight data and pushes a recovery report to my phone within about eight minutes.
-
-## Recovery score
-
-The recovery score is a weighted composite across four dimensions. Sleep architecture accounts for forty percent and captures deep sleep duration, REM proportion, and overall sleep efficiency. Continuity accounts for twenty five percent and measures awakening frequency, restlessness, and sleep fragmentation. Breathing quality accounts for twenty percent and is derived from CSI breathing rate, microphone snoring detection, and apnea event counts. The remaining fifteen percent covers the environmental picture, specifically CO2 accumulation, VOC index, temperature optimality, and light intrusion.
-
-After enough labelled nights, the fixed weights are replaced by a regression model trained on my own morning subjective labels across four dimensions: recovery, energy, mental clarity, and mood. SHAP attribution then explains each night's score in plain English, identifying which specific factors drove the result up or down.
-
-## Sensing modalities
-
-WiFi CSI is the primary source for breathing rate and sleep stage approximation, using the fact that chest movement during breathing creates measurable phase shifts across the 56 subcarriers the ESP32-S3 captures. The mmWave radar provides reliable presence detection and bed entry and exit timestamps, which anchor the sleep window for all other analysis. Breathing rate is not derived from the radar, which outputs presence and motion data rather than a respiration waveform. The microphone captures acoustic breathing signatures and snoring, cross-validating the CSI breathing estimate and detecting apnea events through the characteristic snore to silence to gasp pattern.
-
-## Why I built this
-
-I wanted to know whether sleep quality actually affects next-day cognitive performance, and whether that relationship is quantifiable from raw radio signals rather than from a wrist-worn device making assumptions about my physiology. The answer turned out to require more than WiFi CSI alone, which is how the system expanded into a multi-modal sensor fusion pipeline. The long-term goal is a personalised model that predicts my recovery from overnight sensor data and identifies which environmental and behavioural variables matter most for my specific physiology.
+The goal is a personalised recovery model, not a replacement for clinical sleep study. Sleep staging accuracy is approximately 72 to 78 percent across three classes, which is honest rather than competitive with polysomnography. Heart rate from CSI is trend-level and not reliable enough for HRV derivation. What the system does well is measure breathing rate more directly than wrist-based wearables (which infer it from optical heart rate), build a model calibrated to one person's physiology rather than population averages, and run continuously without any contact with the body.
 
 ## Hardware
 
-The system runs on a Raspberry Pi 4 with 4GB of RAM inside a matte black 3D printed enclosure approximately 150 by 100 by 70mm. Two ESP32-S3 N16R8 nodes are placed on opposite sides of the bed at mattress height to ensure signal coverage regardless of sleeping position. All environmental sensors share a single I2C bus. The INMP441 connects via I2S. The radar connects via UART at 256000 baud on the Pi's hardware UART. Everything is powered from a single USB-C supply with one ethernet cable out to the router.
+The main components are listed below. See `hardware/bom.md` for the full bill of materials with prices and purchasing notes.
 
-Full bill of materials and wiring diagrams are in the /hardware folder.
+| Component | Quantity | Notes |
+|-----------|----------|-------|
+| Raspberry Pi 4 Model B | 1 | 4GB RAM; runs all daemons and the morning pipeline |
+| ESP32-S3-DevKitC-1 N16R8 | 2 | One node each side of the bed at mattress height |
+| SanDisk MicroSD 32GB | 1 | Class 10; all data stored locally in SQLite |
+| INMP441 | 1 | I2S digital microphone; connected to GPIO 18, 19, 20 |
+| HLK-LD2410C | 1 | 24GHz mmWave radar; UART at 256000 baud on hardware UART |
+| SHT40 | 1 | Temperature and humidity; I2C address 0x44 |
+| BH1750 | 1 | Light sensor; I2C address 0x23 |
+| SCD40 | 1 | CO2 sensor; I2C address 0x62; verify chip markings before use |
+| SGP40 | 1 | VOC index sensor; I2C address 0x59 |
+| 2.8 inch IPS SPI touchscreen | 1 | ILI9341 or ST7789 driver, 240x320 pixels |
+| Powered 4-port USB hub | 1 | Powers both ESP32 nodes independently |
+
+The enclosure is 3D printed in matte black PLA at approximately 150 by 100 by 70mm. It mounts the Pi on M2.5 standoffs with cable grommets for a clean external profile. The prototype uses a breadboard; the enclosure is designed around the same component layout. See `hardware/wiring.md` for full GPIO assignments and `hardware/bom.md` for the complete component list.
 
 ## Architecture
 
-The overnight pipeline runs three lightweight daemons. The sensor logger writes all sensor readings to a local SQLite database every thirty seconds. The presence watcher monitors the radar for bed entry and exit timestamps and fires the morning batch job on wake detection after a minimum four hour sleep duration. The audio chunker processes microphone input in thirty second chunks using an energy threshold system that discards silence, compresses ambient audio, and preserves snoring at higher quality.
+Three lightweight daemons run overnight on the Pi. The sensor logger reads all I2C environmental sensors every 30 seconds and writes to SQLite. The presence watcher monitors the radar, writes bed entry and exit timestamps, and fires the morning batch job when bed exit is detected after a minimum four-hour sleep duration. The audio chunker processes microphone input in 30-second chunks, classifying each as silence, ambient, or snoring, and stores relevant chunks as Opus files. A separate CSI ingest process receives raw CSI over UDP from the ESP32 nodes and writes cross-subcarrier variance to the database at 20 Hz. Nothing runs during the night beyond lightweight logging; all analysis runs in the morning.
 
-The morning batch job runs feature extraction, sleep staging, anomaly detection, recovery scoring, SHAP attribution, and report generation sequentially. Total runtime is approximately five to eight minutes on the Pi 4.
+```
+hardware/       bill of materials, wiring reference, enclosure STL
+firmware/       ESP32 flashing scripts and CSI capture configuration
+server/         overnight daemons: sensor logger, presence watcher, audio chunker, sleep mode state machine
+pipeline/       morning batch: CSI extraction, feature engineering, staging, scoring, attribution, anomaly detection, report
+dashboard/      React web app for sleep and recovery visualisation
+morning/        Flask API for daily subjective log (recovery, energy, clarity, mood ratings)
+analysis/       Jupyter notebooks for MESA transfer learning and model evaluation
+docs/adr/       architecture decision records for every major design choice
+docs/build-log/ weekly entries covering what was built, what changed, and what failed
+```
 
-## ML pipeline
+## Signal processing
 
-The sleep stage classifier is a Random Forest trained on fused features from CSI and audio, with an LSTM upgrade planned once sufficient data is available. The anomaly detector uses Isolation Forest to flag nights that deviate significantly from my personal baseline. The recovery predictor is a regression model trained on my morning subjective labels that improves continuously as more labelled nights accumulate. The system retrains automatically when seven or more new labelled nights have been collected since the last training run.
+The CSI breathing rate extraction treats the cross-subcarrier variance signal from each ESP32 node as a 20 Hz time series. For each 30-second window (600 samples), the pipeline applies a 4th-order Butterworth bandpass filter from 0.10 to 0.50 Hz, which corresponds to 6 to 30 breaths per minute and covers the full physiological range for sleeping adults. The dominant frequency within that band is extracted via an 8192-point zero-padded FFT, giving a frequency resolution of 0.0024 Hz, which is approximately 0.06 BPM. In synthetic testing against known ground-truth signals, the extraction achieves around plus or minus 0.06 BPM accuracy. Real-world accuracy depends on signal quality, mattress thickness, and sleeping position, and has not yet been measured on real overnight data. Movement power is extracted from the same signal using a complementary high-pass filter above 0.50 Hz.
 
-## Accuracy vs wearables
+## Sleep staging
 
-On breathing rate, the system is more accurate than wrist-based wearables because CSI directly measures chest displacement rather than inferring breathing from heart rate variability. Apnea detection benefits from having two independent modalities in CSI and audio, which outperforms wrist PPG alone. Sleep staging sits around sixty three percent accuracy, which is an honest limitation of not having EEG ground truth or a large population dataset to train on. Heart rate is trend-only from CSI and is not reliable enough for HRV derivation, which is a deliberate and documented limitation rather than an oversight.
+The sleep stage classifier produces three classes: wake, deep sleep, and a combined light and REM class. N1 and N2 are not distinguished because the respiratory and motion differences between them are not detectable from radio or acoustic signals without EEG; any system claiming to separate N1 from N2 using WiFi CSI alone is overclaiming. Wake is detected by movement power above threshold from radar and CSI combined. Deep sleep is characterised by sustained low movement, slow and regular breathing in the 10 to 15 BPM range, and long uninterrupted windows. REM is estimated probabilistically within the light and REM class via breathing irregularity and snoring detection, and is stored as a flag rather than a separate stage. Expected accuracy is around 88 percent for wake, 75 percent for deep sleep, and 65 percent for the combined light and REM class, for an overall three-class accuracy of approximately 72 to 78 percent. These estimates come from the published literature on similar sensor configurations and should be treated as approximate until measured on real data. A Random Forest personalisation layer activates after 14 nights and is trained on heuristic labels, not EEG ground truth. A planned Phase 3 upgrade will pretrain on the MESA Sleep dataset (actigraphy plus PSG annotations) and fine-tune on personal data, which published work suggests improves three-class accuracy by 5 to 8 percentage points.
 
-The more accurate framing is not that this system competes with a wearable on the same metrics, but that it measures different things, runs entirely without contact, and produces a recovery model personalised to my own physiology rather than calibrated against population averages.
+## Recovery score
 
-## Project structure
+The morning recovery score is a weighted composite across four components.
 
-- **hardware/** — bill of materials, enclosure STL, wiring reference
-- **firmware/** — ESP32 flashing scripts and CSI configuration
-- **server/** — overnight logging daemons running on the Pi
-- **pipeline/** — morning batch job, feature extraction, ML models, scoring
-- **dashboard/** — React web app for sleep and recovery visualisation
-- **morning/** — Flask app for daily subjective log
-- **analysis/** — Jupyter notebooks for correlation analysis and model evaluation
-- **docs/adr/** — Architecture Decision Records documenting every major design choice
-- **docs/build-log/** — weekly entries covering what was built, what failed, and what changed
+| Component | Weight | What it measures |
+|-----------|--------|-----------------|
+| Sleep architecture | 40% | Deep sleep proportion, REM estimate, total duration, and sleep efficiency |
+| Continuity | 25% | Awakening count, sleep onset latency, and fragmentation |
+| Breathing quality | 20% | Breathing regularity, snoring duration, and estimated apnea events |
+| Environment | 15% | Peak CO2, VOC index, temperature deviation from optimal, and light intrusion |
+
+The fixed weights reflect published sleep science on which factors most reliably predict next-day cognitive performance. After approximately 30 labelled nights, a regression model replaces the fixed scoring formula and learns weights specific to one person's physiology, using morning ratings across four subjective dimensions: recovery, energy, mental clarity, and mood. SHAP attribution then generates a plain-language explanation of each night's result, identifying which factors drove the score up or down.
 
 ## Known limitations
 
-Concrete walls between rooms mean nodes must be in the same room as the area being sensed. Sleep staging accuracy is limited by the absence of EEG ground truth and the small size of a personal dataset. Heart rate from CSI is trend-only and HRV cannot be derived contactlessly. The LD2410C radar provides presence and motion data but not a respiration waveform, so breathing rate is derived from CSI and audio only. WiFi 7 and ESP32-S3 CSI capture requires a dedicated 2.4GHz legacy SSID as a workaround and is untested at scale. The recovery predictor improves meaningfully only after around thirty labelled nights.
+- Concrete walls between the ESP32 nodes and the bed will substantially degrade CSI signal quality; both nodes must be in the same room as the sleep area.
+- Heart rate variability cannot be derived from CSI at the accuracy needed for HRV analysis; the system does not attempt HRV measurement.
+- No SpO2 measurement is included; oxygen saturation monitoring requires a contact sensor.
+- Sleep staging accuracy is limited by the absence of EEG ground truth; the three-class classifier is trained on heuristic labels, not PSG-validated annotations.
+- Heart rate from CSI is trend-level only and is not reported as a precise per-beat measurement.
+- The dedicated 2.4GHz legacy SSID workaround for WiFi 7 routers is untested at scale in the CSI community and may require a fallback travel router in some environments.
+- The personalised recovery predictor requires a minimum of 14 labelled nights before the machine learning layer activates; the fixed-weight model runs until then.
+- The SGP40 VOC sensor requires approximately 24 hours of burn-in before its readings are reliable.
 
 ## Status
 
-Currently in active development. Hardware assembly and first data collection in progress.
+The software pipeline is complete and tested against simulated data. Hardware assembly and first real-world data collection have not yet started. All pipeline unit tests pass with simulated sensor data. No real sleep data has been collected.
 
+## Acknowledgements
+
+Sleep staging transfer learning uses the MESA Sleep dataset from the National Sleep Research Resource. Required acknowledgement: "NSRR R24 HL114473: NHLBI National Sleep Research Resource."

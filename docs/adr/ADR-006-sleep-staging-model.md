@@ -37,3 +37,15 @@ The MESA transfer learning approach is the most technically interesting upgrade 
 
 ## Consequences
 The recovery score uses deep sleep duration and proportion as its primary architecture metric, which three-class staging supports well. REM proportion is estimated from irregular breathing windows within the light and REM class rather than classified directly. This is an honest limitation documented in the README. The MESA transfer learning upgrade is tracked as a Phase 3 goal after 25+ nights of data are collected.
+
+## Phase 3 upgrade
+
+Access to the MESA Sleep dataset was approved under a Data Use Agreement (DAUA) with Brigham and Women's Hospital through the National Sleep Research Resource (NSRR). MESA contains 2,056 participants with simultaneous actigraphy and polysomnography annotations at 30-second epochs, which matches the window size used in this pipeline exactly.
+
+The feature overlap between MESA actigraphy and Basecamp CSI is substantial. MESA's activity_count column maps to movement_power derived from the CSI high-pass component. The zero_crossing_rate column from MESA actigraphy maps to the breathing regularity proxy computed from cross-subcarrier variance. Epoch-level features such as epoch_position, time_since_sleep_onset, and rolling movement statistics are computable from both datasets without modification.
+
+Pretraining a Random Forest on MESA features then fine-tuning on 30 or more personal labelled nights is the approach used in the best-performing published contactless staging work. Published results suggest this improves three-class accuracy by 5 to 8 percentage points compared to training on personal heuristic labels alone. This is the only credible path to EEG-validated ground truth in a single-subject system without attaching electrodes.
+
+Per DAUA section 8, raw MESA data files must not be committed to the repository and must be deleted within three years of project completion. Pretrained model weights derived from MESA data may be committed. The notebook implementing this pipeline is at analysis/mesa_transfer.ipynb.
+
+Required acknowledgement for any work using MESA data: "NSRR R24 HL114473: NHLBI National Sleep Research Resource."
