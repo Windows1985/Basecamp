@@ -1,0 +1,17 @@
+# Installation (handled automatically by pi_setup.sh):
+#   sudo cp /home/pi/basecamp/systemd/basecamp-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable basecamp-backup.timer
+#   sudo systemctl start basecamp-backup.timer
+
+[Unit]
+Description=Basecamp nightly SQLite backup timer
+Requires=basecamp-backup.service
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

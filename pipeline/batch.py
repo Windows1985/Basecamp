@@ -26,6 +26,16 @@ def run_pipeline(session_id=None, db_path=None):
         from server.config import DB_PATH
         db_path = DB_PATH
 
+    # Pre-pipeline backup — non-fatal if it fails
+    try:
+        from server.backup import run_backup
+        if not run_backup(db_path=db_path):
+            print("[0/7] WARNING: pre-pipeline backup failed (pipeline continues)")
+        else:
+            print("[0/7] Database backed up successfully")
+    except Exception as _backup_exc:
+        print(f"[0/7] WARNING: pre-pipeline backup error: {_backup_exc}")
+
     summary = {
         "session_id": None,
         "features":   None,
