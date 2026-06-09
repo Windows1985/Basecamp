@@ -57,6 +57,18 @@ def migrate_schema(db_path):
                 stress INTEGER,
                 notes TEXT
             );
+            CREATE TABLE IF NOT EXISTS feature_trends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                computed_at TEXT NOT NULL,
+                session_id INTEGER REFERENCES sleep_sessions(id),
+                feature_name TEXT NOT NULL,
+                slope_7 REAL,
+                slope_14 REAL,
+                mean_7 REAL,
+                z_score REAL,
+                shap_direction TEXT,
+                is_persistent INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS personal_thresholds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 computed_at TEXT NOT NULL,
