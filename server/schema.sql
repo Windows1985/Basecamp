@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS morning_log (
     notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS evening_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES sleep_sessions(id),
+    timestamp TEXT NOT NULL,
+    date TEXT NOT NULL,
+    caffeine_last_dose TEXT,
+    exercise INTEGER,
+    exercise_intensity INTEGER,
+    screen_off_time TEXT,
+    stress INTEGER,
+    notes TEXT
+);
+
 CREATE TABLE IF NOT EXISTS recovery_scores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER REFERENCES sleep_sessions(id),

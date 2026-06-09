@@ -182,9 +182,15 @@ def _write_bed_entry(ts):
     try:
         conn = get_connection(DB_PATH)
         try:
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO sleep_sessions (bed_entry, bed_exit, duration_hours) VALUES (?, NULL, NULL)",
                 (ts,),
+            )
+            session_id = cursor.lastrowid
+            entry_date = ts[:10]  # YYYY-MM-DD
+            conn.execute(
+                "UPDATE evening_log SET session_id = ? WHERE date = ? AND session_id IS NULL",
+                (session_id, entry_date),
             )
             conn.commit()
         finally:
