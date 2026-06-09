@@ -64,7 +64,7 @@ def generate_report(session_id, db_path):
         score_row = conn.execute(
             """
             SELECT architecture_score, continuity_score, breathing_score,
-                   environment_score, total_score
+                   environment_score, total_score, low_confidence_pct
             FROM recovery_scores WHERE session_id = ?
             ORDER BY timestamp DESC LIMIT 1
             """,
@@ -155,6 +155,14 @@ def generate_report(session_id, db_path):
     pos_lines = "\n".join(f"  - {p}" for p in positives) if positives else "  - (none)"
     neg_lines = "\n".join(f"  - {n}" for n in negatives) if negatives else "  - (none)"
 
+    low_conf_pct = float(score_row["low_confidence_pct"] or 0)
+    low_conf_note = (
+        f"\nNote: breathing rate unavailable for {low_conf_pct:.0f}% of windows "
+        "due to signal quality."
+        if low_conf_pct > 20
+        else ""
+    )
+
     report = (
         f"Recovery: {total:.0f}/100\n"
         f"\n"
@@ -166,6 +174,7 @@ def generate_report(session_id, db_path):
         f"Negative:\n{neg_lines}\n"
         f"\n"
         f"Recommendation: {recommendation}"
+        f"{low_conf_note}"
     )
 
     # Send via ntfy (fire-and-forget; failures are non-fatal)

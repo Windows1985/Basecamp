@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS csi_readings (
     timestamp TEXT NOT NULL,
     breathing_rate REAL,
     movement_power REAL,
-    node_id TEXT
+    node_id TEXT,
+    signal_quality REAL
 );
 
 CREATE TABLE IF NOT EXISTS radar_events (
@@ -89,7 +90,8 @@ CREATE TABLE IF NOT EXISTS recovery_scores (
     continuity_score REAL,
     breathing_score REAL,
     environment_score REAL,
-    total_score REAL
+    total_score REAL,
+    low_confidence_pct REAL
 );
 
 CREATE TABLE IF NOT EXISTS shap_values (
@@ -105,7 +107,8 @@ CREATE TABLE IF NOT EXISTS csi_variance (
     timestamp TEXT NOT NULL,
     node_id TEXT NOT NULL,
     variance_value REAL NOT NULL,
-    pi_timestamp REAL
+    pi_timestamp REAL,
+    signal_quality REAL
 );
 
 CREATE TABLE IF NOT EXISTS service_heartbeats (

@@ -560,6 +560,57 @@ function SleepBreakdown({ data, loading }) {
         }}>
           REM estimated from breathing irregularity within light sleep classification
         </p>
+
+        {/* Signal quality timeline — hidden if all values are null */}
+        {(() => {
+          const sqValues = data.csi.map(r => r.sq ?? null);
+          const hasAny = sqValues.some(v => v !== null);
+          if (!hasAny) return null;
+
+          const lowConfPct = data.low_confidence_pct ?? 0;
+
+          function sqColor(v) {
+            if (v === null) return "rgba(255,255,255,0.08)";
+            if (v >= 0.7) return "#00e5a0";
+            if (v >= 0.4) return "#f5a623";
+            return "#ff4d6d";
+          }
+
+          return (
+            <div style={{ marginTop: 14 }}>
+              <p style={{
+                fontFamily: SANS, fontSize: 9, fontWeight: 500, letterSpacing: "0.10em",
+                color: C.label, marginBottom: 6, textTransform: "uppercase",
+              }}>
+                Signal Quality
+              </p>
+              <div style={{
+                display: "flex", height: 12, borderRadius: 4, overflow: "hidden",
+                border: `1px solid ${C.border}`,
+              }}>
+                {sqValues.map((v, i) => (
+                  <div key={i} style={{ flex: 1, background: sqColor(v) }} title={v !== null ? v.toFixed(2) : "—"} />
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                {[["#00e5a0", "≥0.7 good"], ["#f5a623", "0.4–0.7 fair"], ["#ff4d6d", "<0.4 poor"], ["rgba(255,255,255,0.08)", "null"]].map(([color, label]) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div style={{ width: 8, height: 8, background: color, borderRadius: 2 }} />
+                    <span style={{ fontFamily: SANS, fontSize: 9, color: C.muted }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+              {lowConfPct > 0 && (
+                <p style={{
+                  fontFamily: SANS, fontSize: 9, color: C.muted, marginTop: 6,
+                  fontStyle: "italic", lineHeight: 1.5,
+                }}>
+                  {Math.round(lowConfPct)}% of windows were low confidence and excluded from breathing analysis.
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* CO2 chart */}
