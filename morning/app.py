@@ -124,6 +124,16 @@ def latest():
             (session_id,),
         ).fetchall()
 
+        try:
+            trend_rows = conn.execute(
+                "SELECT feature_name, slope_7 FROM feature_trends "
+                "WHERE session_id = ? AND is_persistent = 1 "
+                "ORDER BY ABS(slope_7) DESC",
+                (session_id,),
+            ).fetchall()
+        except Exception:
+            trend_rows = []
+
         sensor_rows = conn.execute(
             """
             SELECT timestamp, temperature, humidity, co2_ppm, voc_index, light_lux
@@ -152,6 +162,17 @@ def latest():
     positives = [r["feature_name"] for r in shap_rows if r["shap_value"] > 0][:3]
     negatives = [r["feature_name"] for r in shap_rows if r["shap_value"] <= 0][:3]
 
+    persistent_factors = []
+    if trend_rows:
+        try:
+            from pipeline.trends import build_factor_display
+            persistent_factors = [
+                build_factor_display(r["feature_name"], r["slope_7"])
+                for r in trend_rows
+            ]
+        except Exception:
+            pass
+
     return jsonify({
         "session_id": session_id,
         "total_score": score_row["total_score"],
@@ -163,8 +184,9 @@ def latest():
         "bed_entry": score_row["bed_entry"],
         "bed_exit": score_row["bed_exit"],
         "duration_hours": score_row["duration_hours"],
-        "positives": positives,
-        "negatives": negatives,
+        "positives":          positives,
+        "negatives":          negatives,
+        "persistent_factors": persistent_factors,
         "sensors": [dict(r) for r in sensor_rows],
         "csi": [dict(r) for r in csi_rows],
     })

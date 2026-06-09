@@ -184,4 +184,23 @@ def generate_attribution(session_id, features, scores, db_path):
     finally:
         conn.close()
 
-    return positives, negatives
+    # Second pass: trend-aware analysis over the last 7–14 nights.
+    # Merge features with scores so trend analysis can include score trajectories.
+    persistent_factors = []
+    try:
+        from pipeline.trends import compute_trends
+        features_and_scores = {
+            **features,
+            "total_score":        scores.get("total_score"),
+            "architecture_score": scores.get("architecture_score"),
+            "continuity_score":   scores.get("continuity_score"),
+            "breathing_score":    scores.get("breathing_score"),
+            "environment_score":  scores.get("environment_score"),
+        }
+        result = compute_trends(session_id, features_and_scores, db_path)
+        if result is not None:
+            persistent_factors = result
+    except Exception:
+        pass  # trend analysis is supplemental — never block attribution
+
+    return positives, negatives, persistent_factors

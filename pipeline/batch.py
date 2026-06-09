@@ -71,15 +71,16 @@ def run_pipeline(session_id=None, db_path=None):
         print(f"[0b/7] WARNING: calibration error: {_cal_exc}")
 
     summary = {
-        "session_id": None,
-        "features":   None,
-        "staging":    None,
-        "scores":     None,
-        "positives":  [],
-        "negatives":  [],
-        "anomaly":    None,
-        "report":     None,
-        "errors":     [],
+        "session_id":         None,
+        "features":           None,
+        "staging":            None,
+        "scores":             None,
+        "positives":          [],
+        "negatives":          [],
+        "persistent_factors": [],
+        "anomaly":            None,
+        "report":             None,
+        "errors":             [],
     }
 
     # ---- Step 1: Identify session ----------------------------------------
@@ -184,12 +185,16 @@ def run_pipeline(session_id=None, db_path=None):
         if summary["features"] is None or summary["scores"] is None:
             raise RuntimeError("Features or scores unavailable")
         from pipeline.attribution import generate_attribution
-        positives, negatives = generate_attribution(
+        positives, negatives, persistent_factors = generate_attribution(
             session_id, summary["features"], summary["scores"], db_path
         )
-        summary["positives"] = positives
-        summary["negatives"] = negatives
-        print(f"[4/7] Attribution — {len(positives)} positive, {len(negatives)} negative factors")
+        summary["positives"]          = positives
+        summary["negatives"]          = negatives
+        summary["persistent_factors"] = persistent_factors
+        print(
+            f"[4/7] Attribution — {len(positives)} positive, {len(negatives)} negative factors, "
+            f"{len(persistent_factors)} persistent trend(s)"
+        )
     except Exception as e:
         summary["errors"].append(f"Step 4 (attribution): {e}")
         print(f"[4/7] FAILED: {e}")

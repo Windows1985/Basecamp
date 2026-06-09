@@ -311,6 +311,71 @@ function LastNight({ data, loading }) {
   );
 }
 
+// ── Persistent trend panel ────────────────────────────────────────────────────
+function TrendPanel({ latest, scoresCount }) {
+  if (scoresCount < 7) {
+    return (
+      <div>
+        <p style={{
+          fontFamily: SANS, fontSize: 10, fontWeight: 500,
+          letterSpacing: "0.12em", color: C.label, marginBottom: 10,
+        }}>
+          PERSISTENT TRENDS
+        </p>
+        <p style={{ fontFamily: SANS, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+          Trend analysis available after 7 nights.
+        </p>
+      </div>
+    );
+  }
+
+  const factors = latest?.persistent_factors ?? [];
+  if (factors.length === 0) return null;
+
+  return (
+    <div>
+      <p style={{
+        fontFamily: SANS, fontSize: 10, fontWeight: 500,
+        letterSpacing: "0.12em", color: C.label, marginBottom: 10,
+      }}>
+        PERSISTENT TRENDS
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {factors.map((f, i) => {
+          const improving = f.direction === "improving";
+          const color = improving ? C.teal : C.red;
+          return (
+            <div key={i} style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              padding: "8px 12px",
+              background: improving ? "rgba(0,229,160,0.05)" : "rgba(255,77,109,0.05)",
+              borderLeft: `2px solid ${color}`,
+              borderRadius: "0 6px 6px 0",
+            }}>
+              <span style={{
+                fontFamily: MONO, fontSize: 16, color, flexShrink: 0, lineHeight: 1.3,
+              }}>
+                {improving ? "↑" : "↓"}
+              </span>
+              <div>
+                <span style={{ fontFamily: SANS, fontSize: 13, color: C.body }}>
+                  {f.magnitude_description}
+                </span>
+                <span style={{
+                  fontFamily: SANS, fontSize: 10, color: C.muted, display: "block",
+                  marginTop: 2,
+                }}>
+                  {f.nights_observed} nights · {f.feature_name.replace(/_/g, " ")}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Trends view ───────────────────────────────────────────────────────────────
 const TT_STYLE = {
   background: "#0d1117",
@@ -321,7 +386,7 @@ const TT_STYLE = {
   fontSize: 12,
 };
 
-function Trends({ scores, loading }) {
+function Trends({ scores, loading, latest }) {
   if (loading) {
     return (
       <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
@@ -411,6 +476,9 @@ function Trends({ scores, loading }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Persistent trends panel */}
+      <TrendPanel latest={latest} scoresCount={chartData.length} />
     </div>
   );
 }
@@ -836,7 +904,7 @@ export default function App() {
 
   const views = [
     <LastNight    key="ln" data={latest}  loading={latestLoading}  />,
-    <Trends       key="tr" scores={scores} loading={scoresLoading}  />,
+    <Trends       key="tr" scores={scores} loading={scoresLoading} latest={latest} />,
     <SleepBreakdown key="sb" data={latest} loading={latestLoading}  />,
     <LogView      key="lv" history={history} loading={historyLoading} />,
   ];
