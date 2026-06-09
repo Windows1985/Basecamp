@@ -234,6 +234,13 @@ step8_services() {
         ok "Copied: $(basename "${f}")"
     done
 
+    # Copy timer files
+    for f in "${svc_src}"/*.timer; do
+        [ -f "${f}" ] || continue
+        cp "${f}" /etc/systemd/system/
+        ok "Copied: $(basename "${f}")"
+    done
+
     # Update ExecStart to use the venv Python
     for f in /etc/systemd/system/basecamp-*.service; do
         [ -f "${f}" ] || continue
@@ -259,6 +266,15 @@ step8_services() {
             printf '  Skipped (no service file): %s\n' "${svc}"
         fi
     done
+
+    # Enable timers (basecamp-backup.service runs only via its timer)
+    if [ -f "/etc/systemd/system/basecamp-backup.timer" ]; then
+        systemctl enable basecamp-backup.timer
+        systemctl start basecamp-backup.timer
+        ok "Enabled and started: basecamp-backup.timer"
+    else
+        printf '  Skipped (no timer file): basecamp-backup.timer\n'
+    fi
 
     warn "Services are NOT started yet — reboot first (see final instructions)"
 }
