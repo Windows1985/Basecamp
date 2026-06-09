@@ -41,6 +41,70 @@ NFFT = 8192            # zero-padded FFT length — gives 0.0024 Hz resolution
 MIN_NODE_QUALITY = 0.05
 
 
+LOW_CONFIDENCE_THRESHOLD = 0.5   # quality < this → low confidence
+
+
+# ── Signal quality ─────────────────────────────────────────────────────────────
+
+def compute_signal_quality(variance_window, fs=FS):
+    """
+    Compute a 0.0–1.0 signal quality score for a 30-second variance window.
+
+    Uses FFT-based peak-to-noise ratio in the breathing band (0.1–0.5 Hz):
+      - peak power / mean noise power of remaining band bins
+      - mapped via sigmoid: quality = 1 / (1 + exp(-(ratio - 4.0) / 1.5))
+        ratio 4.0 → 0.50, ratio 2.0 → ~0.12, ratio 8.0 → ~0.93
+
+    Returns 0.0 for zero/empty inputs without raising.
+    """
+    n = len(variance_window)
+    if n < 2:
+        return 0.0
+
+    arr = np.asarray(variance_window, dtype=float)
+    if not np.any(arr):
+        return 0.0
+
+    signal = arr - float(np.mean(arr))
+
+    # Hanning window reduces spectral leakage so real breathing peaks remain
+    # sharp, while broadband noise energy stays spread across all bins.
+    # Zero-padding to NFFT gives ~167 bins in the breathing band (vs ~13 without),
+    # making white noise reliably produce lower peak-to-noise ratios on average.
+    hann = np.hanning(n)
+    signal = signal * hann
+    nfft = max(NFFT, 2 * n)
+    freqs = np.fft.rfftfreq(nfft, d=1.0 / fs)
+    psd = np.abs(np.fft.rfft(signal, n=nfft)) ** 2
+
+    band_mask = (freqs >= BREATH_LOW_HZ) & (freqs <= BREATH_HIGH_HZ)
+    if not np.any(band_mask):
+        return 0.0
+
+    band_psd = psd[band_mask]
+    if not np.any(band_psd):
+        return 0.0
+
+    peak_idx = int(np.argmax(band_psd))
+    peak_power = float(band_psd[peak_idx])
+
+    # Noise: mean over band excluding peak ± 1 bin
+    noise_mask = np.ones(len(band_psd), dtype=bool)
+    for i in range(max(0, peak_idx - 1), min(len(band_psd), peak_idx + 2)):
+        noise_mask[i] = False
+
+    if not np.any(noise_mask):
+        return 0.5  # only one or two bins in band — indeterminate
+
+    noise_mean = float(np.mean(band_psd[noise_mask]))
+    if noise_mean <= 0:
+        return 1.0
+
+    ratio = peak_power / noise_mean
+    quality = 1.0 / (1.0 + np.exp(-(ratio - 4.0) / 1.5))
+    return float(np.clip(quality, 0.0, 1.0))
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _bandpass_sos(low=BREATH_LOW_HZ, high=BREATH_HIGH_HZ, fs=FS, order=FILTER_ORDER):
@@ -135,12 +199,14 @@ def _process_node_variance(timestamps, variance, session_id, window_sec=WINDOW_S
         feats = extract_window_features(chunk, fs=fs)
         if feats is None:
             continue
+        sq = compute_signal_quality(chunk, fs=fs)
         results.append({
             "window_start": timestamps[w * samples_per_window],
             "breathing_rate_bpm": feats["breathing_rate_bpm"],
             "breathing_regularity": feats["breathing_regularity"],
             "movement_power": feats["movement_power"],
             "quality": feats["breathing_regularity"],
+            "signal_quality": sq,
         })
 
     return results
@@ -178,6 +244,12 @@ def _fuse_nodes(node_windows):
                 weights.append(q)
                 move_powers.append(win["movement_power"])
 
+        # Collect signal_quality values for quality-weighted average
+        sq_vals = [
+            node_windows[nid][w].get("signal_quality") or 0.0
+            for nid in node_ids
+        ]
+
         if not bpms:
             # All nodes below threshold — use simple average
             bpms = [node_windows[nid][w]["breathing_rate_bpm"] for nid in node_ids]
@@ -188,12 +260,14 @@ def _fuse_nodes(node_windows):
         fused_bpm = sum(b * wt for b, wt in zip(bpms, weights)) / total_w
         fused_move = sum(m * wt for m, wt in zip(move_powers, weights)) / total_w
         fused_quality = total_w / len(node_ids)
+        fused_sq = float(np.mean(sq_vals)) if sq_vals else None
 
         fused.append({
             "window_start": window_start,
             "breathing_rate_bpm": fused_bpm,
             "breathing_regularity": fused_quality,
             "movement_power": fused_move,
+            "signal_quality": fused_sq,
         })
 
     return fused
@@ -278,14 +352,16 @@ def extract_csi_features(session_id, db_path):
             for win in windows:
                 conn.execute(
                     """
-                    INSERT INTO csi_readings (timestamp, breathing_rate, movement_power, node_id)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO csi_readings
+                      (timestamp, breathing_rate, movement_power, node_id, signal_quality)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         win["window_start"],
                         win["breathing_rate_bpm"],
                         win["movement_power"],
                         node_id,
+                        win.get("signal_quality"),
                     ),
                 )
 
@@ -293,14 +369,16 @@ def extract_csi_features(session_id, db_path):
         for win in fused_windows:
             conn.execute(
                 """
-                INSERT INTO csi_readings (timestamp, breathing_rate, movement_power, node_id)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO csi_readings
+                  (timestamp, breathing_rate, movement_power, node_id, signal_quality)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     win["window_start"],
                     win["breathing_rate_bpm"],
                     win["movement_power"],
                     "fused",
+                    win.get("signal_quality"),
                 ),
             )
 

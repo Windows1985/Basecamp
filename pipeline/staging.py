@@ -284,7 +284,10 @@ def _heuristic_single(w, regularity, thr=None):
 
     # Step 3: breathing validity
     if np.isnan(br) or br < 5.0 or br > 35.0:
-        return WAKE, False, False
+        # Breathing unavailable — inconclusive for breathing-based rules.
+        # Movement and audio tier rules still apply; do not force WAKE.
+        probable_rem = w["audio_tier"] == "snore"
+        return LIGHT_REM, probable_rem, False
 
     # Step 4: deep candidate (run enforcement applied by caller)
     deep_candidate = (

@@ -45,11 +45,18 @@ def calculate_recovery_score(features, session_id, db_path):
     continuity_score = aw_penalty * 0.60 + onset_score * 0.40
 
     # ---- Breathing (20 %) -----------------------------------------------
-    reg_score = _clamp(features["breathing_regularity"] * 1.5)  # regularity < 0.67 → 1.0
+    br_reg = features.get("breathing_regularity")
+    reg_score = _clamp((br_reg if br_reg is not None else 0.5) * 1.5)
     apnea_score = _clamp(1.0 - features["apnea_count"] * 0.18)
     snore_score = _clamp(1.0 - features["snoring_duration_minutes"] / 60.0)
 
     breathing_score = reg_score * 0.30 + apnea_score * 0.45 + snore_score * 0.25
+
+    # Low-confidence penalty: if >50 % of windows were low confidence, discount
+    low_conf_pct = float(features.get("csi_low_confidence_pct") or 0.0)
+    if low_conf_pct > 50.0:
+        penalty = (low_conf_pct - 50.0) / 100.0
+        breathing_score *= (1.0 - penalty)
 
     # ---- Environment (15 %) ---------------------------------------------
     peak_co2 = features["peak_co2"]
@@ -91,8 +98,8 @@ def calculate_recovery_score(features, session_id, db_path):
             """
             INSERT INTO recovery_scores
               (session_id, timestamp, architecture_score, continuity_score,
-               breathing_score, environment_score, total_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+               breathing_score, environment_score, total_score, low_confidence_pct)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -102,6 +109,7 @@ def calculate_recovery_score(features, session_id, db_path):
                 round(breathing_score * 100, 1),
                 round(environment_score * 100, 1),
                 total_score_100,
+                low_conf_pct if low_conf_pct > 0 else None,
             ),
         )
         conn.commit()
@@ -115,6 +123,7 @@ def calculate_recovery_score(features, session_id, db_path):
         "breathing_score": round(breathing_score * 100, 1),
         "environment_score": round(environment_score * 100, 1),
         "total_score": total_score_100,
+        "low_confidence_pct": low_conf_pct if low_conf_pct > 0 else None,
         # sub-scores used in attribution
         "_deep_score": deep_score,
         "_rem_score": rem_score,

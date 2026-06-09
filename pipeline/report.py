@@ -64,7 +64,7 @@ def generate_report(session_id, db_path):
         score_row = conn.execute(
             """
             SELECT architecture_score, continuity_score, breathing_score,
-                   environment_score, total_score
+                   environment_score, total_score, low_confidence_pct
             FROM recovery_scores WHERE session_id = ?
             ORDER BY timestamp DESC LIMIT 1
             """,
@@ -155,28 +155,13 @@ def generate_report(session_id, db_path):
     pos_lines = "\n".join(f"  - {p}" for p in positives) if positives else "  - (none)"
     neg_lines = "\n".join(f"  - {n}" for n in negatives) if negatives else "  - (none)"
 
-    # Load at most 2 persistent trend factors for the notification
-    trend_section = ""
-    try:
-        conn3 = get_connection(db_path)
-        try:
-            trend_rows = conn3.execute(
-                "SELECT feature_name, slope_7 FROM feature_trends "
-                "WHERE session_id = ? AND is_persistent = 1 "
-                "ORDER BY ABS(slope_7) DESC LIMIT 2",
-                (session_id,),
-            ).fetchall()
-        finally:
-            conn3.close()
-        if trend_rows:
-            from pipeline.trends import build_factor_display
-            lines = []
-            for r in trend_rows:
-                fac = build_factor_display(r["feature_name"], r["slope_7"])
-                lines.append(fac["magnitude_description"].capitalize() + ".")
-            trend_section = "\n\nTrends:\n" + "\n".join(f"  {ln}" for ln in lines)
-    except Exception:
-        pass  # feature_trends may not exist yet on first run
+    low_conf_pct = float(score_row["low_confidence_pct"] or 0)
+    low_conf_note = (
+        f"\nNote: breathing rate unavailable for {low_conf_pct:.0f}% of windows "
+        "due to signal quality."
+        if low_conf_pct > 20
+        else ""
+    )
 
     report = (
         f"Recovery: {total:.0f}/100\n"
@@ -189,7 +174,7 @@ def generate_report(session_id, db_path):
         f"Negative:\n{neg_lines}\n"
         f"\n"
         f"Recommendation: {recommendation}"
-        f"{trend_section}"
+        f"{low_conf_note}"
     )
 
     # Send via ntfy (fire-and-forget; failures are non-fatal)

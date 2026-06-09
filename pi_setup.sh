@@ -248,6 +248,10 @@ step8_services() {
     done
     ok "Service files updated to use venv Python (${PYTHON})"
 
+    # Ensure the crash-notification template service is in place.
+    # Do NOT enable or start it directly — systemd instantiates it via OnFailure.
+    sudo cp "${svc_src}/basecamp-notify@.service" /etc/systemd/system/ 2>/dev/null || true
+
     systemctl daemon-reload
 
     # Enable services (skip any that aren't present)

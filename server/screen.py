@@ -724,3 +724,89 @@ class BasecampScreen:
             except Exception:
                 pass
         self._headless = True
+
+
+# ── Demo mode entry point ─────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Basecamp screen controller")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Cycle through all layouts with hardcoded fake data every 4 seconds",
+    )
+    args = parser.parse_args()
+
+    if args.demo:
+        _DEMO_DATA = {
+            "score": 74,
+            "duration_hours": 7.2,
+            "deep_sleep_pct": 18,
+            "rem_pct": 22,
+            "breathing_rate": 14.2,
+            "co2_peak": 847,
+            "positive_factors": ["consistent sleep timing", "low movement fragmentation"],
+            "negative_factors": ["elevated CO2 in second half"],
+            "persistent_trends": ["deep sleep declining ~3 min/night over 7 nights"],
+        }
+
+        _DEMO_SESSION = {
+            "score": _DEMO_DATA["score"],
+            "duration_hours": _DEMO_DATA["duration_hours"],
+            "bed_entry": "2026-06-09T23:00:00",
+            "bed_exit": "2026-06-10T06:12:00",
+            "architecture_score": 72,
+            "continuity_score": 81,
+            "breathing_score": 68,
+            "environment_score": 79,
+            "positive_factors": _DEMO_DATA["positive_factors"],
+            "negative_factors": _DEMO_DATA["negative_factors"],
+        }
+
+        LAYOUTS = ["IDLE", "MORNING", "LOG"]
+
+        screen = BasecampScreen(mock=True)
+        screen.turn_on()
+
+        # Pre-load morning data
+        screen.show_morning(_DEMO_SESSION)
+
+        try:
+            import time as _time
+            clock = _pg.time.Clock() if _PYGAME_OK else None
+            layout_idx = 0
+            last_switch = _time.monotonic()
+
+            print(f"[DEMO] Starting — layout: {LAYOUTS[layout_idx]}")
+
+            while True:
+                # Handle quit event
+                if _PYGAME_OK:
+                    for event in _pg.event.get():
+                        if event.type == _pg.QUIT:
+                            raise KeyboardInterrupt
+
+                now = _time.monotonic()
+                if now - last_switch >= 4.0:
+                    layout_idx = (layout_idx + 1) % len(LAYOUTS)
+                    layout_name = LAYOUTS[layout_idx]
+                    print(f"[DEMO] Layout: {layout_name}")
+                    last_switch = now
+
+                    if layout_name == "IDLE":
+                        screen.show_idle()
+                    elif layout_name == "MORNING":
+                        screen.show_morning(_DEMO_SESSION)
+                    elif layout_name == "LOG":
+                        screen.show_bedtime_prompt()
+
+                screen.tick()
+                if clock:
+                    clock.tick(30)
+
+        except KeyboardInterrupt:
+            print("[DEMO] Exiting.")
+        finally:
+            screen.cleanup()
