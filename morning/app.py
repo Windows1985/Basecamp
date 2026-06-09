@@ -166,6 +166,120 @@ def latest():
     })
 
 
+@app.route("/log/evening", methods=["POST"])
+def log_evening():
+    _ensure_db()
+    data = request.get_json(silent=True) or request.form
+
+    try:
+        date = str(data.get("date", "")).strip()
+        if not date:
+            return jsonify({"success": False, "error": "date is required"}), 400
+
+        caffeine_last_dose = data.get("caffeine_last_dose") or None
+        screen_off_time = data.get("screen_off_time") or None
+        notes = str(data.get("notes", "")).strip() or None
+
+        exercise = data.get("exercise")
+        exercise = int(exercise) if exercise is not None else None
+
+        exercise_intensity = data.get("exercise_intensity")
+        exercise_intensity = int(exercise_intensity) if exercise_intensity is not None else None
+
+        stress = data.get("stress")
+        stress = max(1, min(10, int(stress))) if stress is not None else None
+
+        now = datetime.now().isoformat()
+
+        conn = get_connection(_DB_PATH)
+        try:
+            existing = conn.execute(
+                "SELECT id FROM evening_log WHERE date = ?", (date,)
+            ).fetchone()
+
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE evening_log SET
+                        timestamp = ?,
+                        caffeine_last_dose = ?,
+                        exercise = ?,
+                        exercise_intensity = ?,
+                        screen_off_time = ?,
+                        stress = ?,
+                        notes = ?
+                    WHERE date = ?
+                    """,
+                    (now, caffeine_last_dose, exercise, exercise_intensity,
+                     screen_off_time, stress, notes, date),
+                )
+                new_id = existing["id"]
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO evening_log
+                      (timestamp, date, caffeine_last_dose, exercise, exercise_intensity,
+                       screen_off_time, stress, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (now, date, caffeine_last_dose, exercise, exercise_intensity,
+                     screen_off_time, stress, notes),
+                )
+                new_id = cursor.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+
+        return jsonify({"success": True, "id": new_id})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/log/evening/history")
+def log_evening_history():
+    _ensure_db()
+    conn = get_connection(_DB_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM evening_log ORDER BY date DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/log/evening/<date>")
+def log_evening_by_date(date):
+    _ensure_db()
+    conn = get_connection(_DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT * FROM evening_log WHERE date = ?", (date,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(dict(row))
+
+
+@app.route("/log/evening")
+def log_evening_latest():
+    _ensure_db()
+    conn = get_connection(_DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT * FROM evening_log ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return jsonify({"error": "No evening log entries"}), 404
+    return jsonify(dict(row))
+
+
 @app.route("/scores")
 def scores():
     """All sessions that have recovery scores, one row per session (latest score),
