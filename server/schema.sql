@@ -136,3 +136,12 @@ CREATE TABLE IF NOT EXISTS sleep_stages (
     source        TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sleep_sessions(id)
 );
+
+CREATE TABLE IF NOT EXISTS daemon_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    daemon_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_notified_at TEXT,
+    UNIQUE(daemon_name, date)
+);

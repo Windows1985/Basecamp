@@ -48,6 +48,14 @@ def migrate_schema(db_path):
         # Ensure new tables exist (idempotent — schema.sql uses IF NOT EXISTS)
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS daemon_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                daemon_name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                last_notified_at TEXT,
+                UNIQUE(daemon_name, date)
+            );
             CREATE TABLE IF NOT EXISTS evening_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER REFERENCES sleep_sessions(id),

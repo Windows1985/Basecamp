@@ -73,9 +73,8 @@ Navigate with arrow keys, Enter to select, Q to quit and save. Set the following
 |---------|-------|
 | WiFi SSID | `RuView-24` |
 | WiFi Password | your password |
-| UDP Receiver IP | Pi's static IP e.g. `192.168.1.100` |
-| UDP Receiver Port | `5500` |
-| Node ID | `1` |
+
+> **Note:** SSID and password in menuconfig are compile-time fallbacks only — provision.py overrides them at runtime via NVS. You still need to set them here so the firmware has a fallback if NVS is blank.
 
 ### Serial flasher config
 | Setting | Value |
@@ -112,23 +111,34 @@ Put the ESP32-S3 into download mode:
 
 Find your COM port: open Device Manager → Ports (COM & LPT). It will appear as `USB Serial Device (COMx)` or `CP210x (COMx)`.
 
+Use `flash.sh` from the repo root (run from Git Bash, WSL, or Linux/Mac terminal):
+
 ```bash
-python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
-  --before default-reset --after hard-reset \
-  write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB \
-  0x0     build/bootloader/bootloader.bin \
-  0x8000  build/partition_table/partition-table.bin \
-  0x10000 build/esp32-csi-node.bin
+./firmware/flash.sh 1 COM7
 ```
 
-Replace `COM7` with your actual port. Use `--flash-size 16MB` — the N16R8 has 16MB flash, not 4MB.
+Replace `COM7` with your actual port (e.g. `/dev/ttyUSB0` on Linux). The script validates that a build exists, prints the esptool command, and runs it.
 
 Expected output ends with:
 ```
 Hash of data verified.
 Leaving...
 Hard resetting via RTS pin...
+Flash complete. Now provision Node 1: ...
 ```
+
+> **Fallback — manual esptool command**
+>
+> If `flash.sh` is unavailable (e.g. on a restricted Windows device without Git Bash):
+> ```bash
+> python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
+>   --before default-reset --after hard-reset \
+>   write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB \
+>   0x0     build/bootloader/bootloader.bin \
+>   0x8000  build/partition_table/partition-table.bin \
+>   0x10000 build/esp32-csi-node.bin
+> ```
+> Use `--flash-size 16MB` — the N16R8 has 16MB flash, not 4MB.
 
 ---
 
@@ -182,30 +192,88 @@ while True:
 
 Expected: 5 packets within 10 seconds.
 
+> **Note:** At this point the node is using the compiled-in Kconfig defaults for Node ID,
+> target IP, and UDP port. Provision it in Step 7.5 before relying on those values.
+
 ---
 
-## 8. Configure and Flash — Node 2
+## 7.5. Provision Node 1
 
-Node 2 is identical to Node 1 except for the Node ID. You need a full rebuild because Node ID is baked in at compile time.
-
-```bash
-# Still in active_sta/
-idf.py menuconfig
-```
-
-Change only:
-
-| Setting | Old | New |
-|---------|-----|-----|
-| Node ID | `1` | `2` |
-
-Save, then:
+With Node 1 still connected via USB, write the node-specific config (Node ID, target IP,
+UDP port, WiFi credentials) to the NVS partition without reflashing the firmware binary:
 
 ```bash
-idf.py build
+python firmware/provision.py \
+    --port COM7 \
+    --node-id 1 \
+    --ssid RuView-24 \
+    --password YOUR_PASSWORD \
+    --target-ip 192.168.1.100 \
+    --target-port 5500
 ```
 
-Connect Node 2, put it into download mode, flash with the same command as Node 1 (same COM port if Node 1 is disconnected, or a different port if both are connected).
+Replace `COM7`, `YOUR_PASSWORD`, and `192.168.1.100` with your actual values.
+
+| Flag | What it does |
+|------|-------------|
+| `--port` | Serial port connected to the ESP32 |
+| `--node-id` | Node ID written to NVS (1 = left bedside, 2 = right ledge) |
+| `--ssid` | WiFi SSID written to NVS (overrides compiled-in default) |
+| `--password` | WiFi password written to NVS |
+| `--target-ip` | Pi IP address the node streams CSI data to |
+| `--target-port` | UDP port (default 5500, matches `server/config.py`) |
+
+The device **does not** need to be in download mode for an NVS-only flash.
+
+After provisioning, power-cycle the ESP32 and confirm the serial monitor shows:
+
+```
+ESP32-S3 CSI Node -- Node ID: 1
+WiFi STA initialized, connecting to SSID: RuView-24
+Connected to WiFi
+CSI streaming active -> 192.168.1.100:5500
+```
+
+> **Cate School variant (Pi hotspot)**
+>
+> At Cate School, the Pi acts as an access point on `10.42.0.1`.
+> Use this provision command instead:
+> ```bash
+> python firmware/provision.py \
+>     --port COM7 \
+>     --node-id 1 \
+>     --ssid Basecamp-Pi \
+>     --password YOUR_PASSWORD \
+>     --target-ip 10.42.0.1 \
+>     --target-port 5500
+> ```
+
+---
+
+## 8. Flash and Provision — Node 2
+
+Node 2 uses the **same firmware binary** as Node 1 — no rebuild is needed. Connect Node 2,
+put it into download mode (hold BOOT, press RESET, release BOOT), and flash:
+
+```bash
+./firmware/flash.sh 2 COM8
+```
+
+Replace `COM8` with Node 2's actual port (use a different port to Node 1 if both are connected).
+
+Then provision Node 2 (no download mode needed):
+
+```bash
+python firmware/provision.py \
+    --port COM8 \
+    --node-id 2 \
+    --ssid RuView-24 \
+    --password YOUR_PASSWORD \
+    --target-ip 192.168.1.100 \
+    --target-port 5500
+```
+
+Power-cycle Node 2 and confirm the serial monitor shows `Node ID: 2` and the correct target IP.
 
 Place Node 2 on the right ledge at mattress height. Route the 3–5m USB-C cable along the skirting board to the powered USB hub.
 
@@ -272,3 +340,5 @@ pause
 | Packets from only 1 node | Node 2 not connected | Check Node 2 serial output; verify Node ID was changed and reflashed |
 | CSI data looks wrong / all zeros | FreeRTOS tick rate at default 100Hz | Set to 1000Hz in menuconfig, rebuild |
 | `--flash-size detect` shows 4MB | Wrong flash size flag | Use `--flash-size 16MB` explicitly for N16R8 |
+| Node ID in serial output is wrong | provision.py not run yet or NVS not picked up | Run provision.py, power-cycle, check serial output |
+| `provision.py: module not found` | esp-idf-nvs-partition-gen not installed | `pip install esp-idf-nvs-partition-gen` |

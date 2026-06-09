@@ -1,0 +1,18 @@
+# Template service invoked automatically via OnFailure=basecamp-notify@%n.service
+# in each daemon's service file.  Do NOT enable or start this template directly.
+# Installation (handled by pi_setup.sh):
+#   sudo cp /home/pi/basecamp/systemd/basecamp-notify@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+
+[Unit]
+Description=Basecamp crash notification for %i
+DefaultDependencies=no
+After=network.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/basecamp
+ExecStart=/usr/bin/python3 /home/pi/basecamp/server/crash_notify.py %i
+StandardOutput=journal
+StandardError=journal
