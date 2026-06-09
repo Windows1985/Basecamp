@@ -136,7 +136,10 @@ def latest():
 
         csi_rows = conn.execute(
             """
-            SELECT timestamp, AVG(breathing_rate) AS br, AVG(movement_power) AS mp
+            SELECT timestamp,
+                   AVG(breathing_rate)  AS br,
+                   AVG(movement_power)  AS mp,
+                   AVG(signal_quality)  AS sq
             FROM csi_readings
             WHERE timestamp >= ? AND timestamp <= ?
             GROUP BY timestamp ORDER BY timestamp
@@ -156,6 +159,7 @@ def latest():
         "continuity_score": score_row["continuity_score"],
         "breathing_score": score_row["breathing_score"],
         "environment_score": score_row["environment_score"],
+        "low_confidence_pct": score_row["low_confidence_pct"],
         "bed_entry": score_row["bed_entry"],
         "bed_exit": score_row["bed_exit"],
         "duration_hours": score_row["duration_hours"],

@@ -1,6 +1,7 @@
 """
 Extracts sleep features from raw sensor data for a given session.
 """
+import logging
 import os
 import sys
 from datetime import datetime
@@ -9,6 +10,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.db import get_connection
+
+logger = logging.getLogger(__name__)
+
+_LOW_CONFIDENCE_QUALITY = 0.5   # windows below this threshold are excluded
+_LOW_CONFIDENCE_WARN_PCT = 80.0  # warn and null-out breathing if > this % excluded
 
 
 def extract_features(session_id, db_path):
@@ -36,12 +42,13 @@ def extract_features(session_id, db_path):
         bed_exit_str = session["bed_exit"]
         duration_hours = float(session["duration_hours"])
 
-        # Average CSI across all nodes per timestamp
+        # Average CSI across all nodes per timestamp; include mean signal quality
         csi_rows = conn.execute(
             """
             SELECT timestamp,
-                   AVG(breathing_rate) AS br,
-                   AVG(movement_power) AS mp
+                   AVG(breathing_rate)  AS br,
+                   AVG(movement_power)  AS mp,
+                   AVG(signal_quality)  AS sq
             FROM csi_readings
             WHERE timestamp >= ? AND timestamp <= ?
             GROUP BY timestamp
@@ -77,6 +84,19 @@ def extract_features(session_id, db_path):
 
     br_raw = np.array([float(r["br"]) for r in csi_rows])
     mp_raw = np.array([float(r["mp"]) for r in csi_rows])
+
+    # ---- Signal quality metrics -----------------------------------------
+    sq_raw = np.array([
+        float(r["sq"]) if r["sq"] is not None else float("nan")
+        for r in csi_rows
+    ])
+    n_total = len(sq_raw)
+    # windows with known quality below threshold (treat null quality as high confidence)
+    low_conf_mask = np.where(~np.isnan(sq_raw), sq_raw < _LOW_CONFIDENCE_QUALITY, False)
+    n_low = int(np.sum(low_conf_mask))
+    csi_low_confidence_pct = float(n_low / n_total * 100.0) if n_total > 0 else 0.0
+    sq_valid = sq_raw[~np.isnan(sq_raw)]
+    csi_quality_mean = float(np.mean(sq_valid)) if len(sq_valid) > 0 else None
 
     # 5-sample moving average (2.5 min) for stage estimation
     W = 5
@@ -122,12 +142,35 @@ def extract_features(session_id, db_path):
     rem_proportion = float(np.sum(stages == "rem") / n)
 
     # ---- Breathing metrics ----------------------------------------------
-    valid_br = br_raw[br_raw > 2]  # exclude apnea zeroes
-    mean_br = float(np.mean(valid_br)) if len(valid_br) > 0 else 14.0
-    std_br = float(np.std(valid_br)) if len(valid_br) > 0 else 1.0
+    if csi_low_confidence_pct > _LOW_CONFIDENCE_WARN_PCT:
+        logger.warning(
+            "Session %s: %.0f%% of CSI windows are low confidence — "
+            "breathing_rate_mean and breathing_regularity set to None",
+            session_id, csi_low_confidence_pct,
+        )
+        mean_br = None
+        std_br = None
+        breathing_regularity = None
+    else:
+        # Exclude low-confidence windows from breathing averages
+        high_conf_mask = ~low_conf_mask
+        br_hc = br_raw[high_conf_mask]
+        valid_br = br_hc[br_hc > 2] if len(br_hc) > 0 else np.array([])
+        mean_br = float(np.mean(valid_br)) if len(valid_br) > 0 else 14.0
+        std_br = float(np.std(valid_br)) if len(valid_br) > 0 else 1.0
 
-    br_variance = float(np.var(br_smooth))
-    breathing_regularity = 1.0 / (1.0 + br_variance)
+        # Regularity on smoothed high-confidence signal
+        br_hc_smooth_src = br_raw.copy()
+        br_hc_smooth_src[low_conf_mask] = np.nan
+        # fill nans with interpolation for smoothing
+        nans = np.isnan(br_hc_smooth_src)
+        if np.any(~nans):
+            br_hc_smooth_src[nans] = np.interp(
+                np.where(nans)[0], np.where(~nans)[0], br_hc_smooth_src[~nans]
+            )
+        br_hc_smooth = np.convolve(br_hc_smooth_src, np.ones(W) / W, mode="valid")
+        br_variance = float(np.var(br_hc_smooth)) if len(br_hc_smooth) > 0 else 1.0
+        breathing_regularity = 1.0 / (1.0 + br_variance)
 
     # ---- Apnea count ----------------------------------------------------
     apnea_count = int(np.sum(br_raw < 2.0))
@@ -211,6 +254,8 @@ def extract_features(session_id, db_path):
         "light_intrusion_events": light_intrusion_events,
         "total_sleep_duration_hours": duration_hours,
         "sleep_efficiency": sleep_efficiency,
+        "csi_low_confidence_pct": csi_low_confidence_pct,
+        "csi_quality_mean": csi_quality_mean,
     }
 
 
@@ -238,4 +283,6 @@ def _empty_features(session_id, duration_hours):
         "light_intrusion_events": 0,
         "total_sleep_duration_hours": duration_hours,
         "sleep_efficiency": 0.85,
+        "csi_low_confidence_pct": 0.0,
+        "csi_quality_mean": None,
     }
