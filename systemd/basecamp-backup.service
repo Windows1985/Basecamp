@@ -10,6 +10,7 @@
 [Unit]
 Description=Basecamp nightly SQLite backup
 After=network.target
+OnFailure=basecamp-notify@%n.service
 
 [Service]
 Type=oneshot
