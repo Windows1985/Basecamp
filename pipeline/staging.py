@@ -31,11 +31,14 @@ Expected accuracy (population average, not personalised):
 This module outputs a sleep depth index, not clinical PSG staging.
 """
 
+import logging
+import logging.handlers
 import os
 import sys
 import pickle
 from datetime import datetime, timezone
 from collections import Counter
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -51,6 +54,21 @@ from server.config import (
     DEEP_RUN_MIN_WINDOWS,
     STAGING_MIN_NIGHTS_ML,
 )
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+os.makedirs("logs", exist_ok=True)
+_handler = logging.handlers.RotatingFileHandler(
+    "logs/staging.log", maxBytes=5 * 1024 * 1024, backupCount=3
+)
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+_stream = logging.StreamHandler()
+_stream.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+log = logging.getLogger("staging")
+log.setLevel(logging.INFO)
+log.addHandler(_handler)
+log.addHandler(_stream)
 
 # ── Stage labels ───────────────────────────────────────────────────────────────
 WAKE      = "WAKE"
@@ -195,6 +213,42 @@ def _load_windows(session_id, db_path):
     return windows
 
 
+# ── Personal thresholds ────────────────────────────────────────────────────────
+
+def load_thresholds(db_path):
+    """
+    Return the active personal_thresholds row as a SimpleNamespace, or None if
+    no active row exists or the table is not yet created.
+    """
+    try:
+        conn = get_connection(db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT computed_at, movement_low, movement_high,
+                       breathing_low, breathing_high, breathing_mean
+                FROM personal_thresholds
+                WHERE is_active = 1
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return SimpleNamespace(
+            computed_at=row["computed_at"],
+            movement_low=float(row["movement_low"]),
+            movement_high=float(row["movement_high"]),
+            breathing_low=float(row["breathing_low"]),
+            breathing_high=float(row["breathing_high"]),
+            breathing_mean=float(row["breathing_mean"]),
+        )
+    except Exception:
+        return None
+
+
 # ── Heuristic ──────────────────────────────────────────────────────────────────
 
 def _compute_regularity(br_array, idx, half_window=5):
@@ -207,17 +261,25 @@ def _compute_regularity(br_array, idx, half_window=5):
     return float(1.0 / (1.0 + np.var(valid)))
 
 
-def _heuristic_single(w, regularity):
-    """Return (stage, probable_rem, deep_candidate)."""
+def _heuristic_single(w, regularity, thr=None):
+    """Return (stage, probable_rem, deep_candidate).
+
+    thr: SimpleNamespace from load_thresholds(), or None to use config constants.
+    """
     mp = w["mp"]
     br = w["br"]
 
+    mp_low  = thr.movement_low  if thr is not None else MOVEMENT_THRESHOLD_LOW
+    mp_high = thr.movement_high if thr is not None else MOVEMENT_THRESHOLD_HIGH
+    br_min  = thr.breathing_low  if thr is not None else DEEP_BREATHING_MIN
+    br_max  = thr.breathing_high if thr is not None else DEEP_BREATHING_MAX
+
     # Step 1: presence check
-    if not w["presence"] and mp < MOVEMENT_THRESHOLD_LOW:
+    if not w["presence"] and mp < mp_low:
         return WAKE, False, False
 
     # Step 2: movement gate
-    if mp > MOVEMENT_THRESHOLD_HIGH:
+    if mp > mp_high:
         return WAKE, False, False
 
     # Step 3: breathing validity
@@ -226,8 +288,8 @@ def _heuristic_single(w, regularity):
 
     # Step 4: deep candidate (run enforcement applied by caller)
     deep_candidate = (
-        mp < MOVEMENT_THRESHOLD_LOW
-        and DEEP_BREATHING_MIN <= br <= DEEP_BREATHING_MAX
+        mp < mp_low
+        and br_min <= br <= br_max
         and regularity > REGULARITY_THRESHOLD_HIGH
         and w["audio_tier"] in ("silence", "ambient")
     )
@@ -235,7 +297,7 @@ def _heuristic_single(w, regularity):
     # Step 5: REM indicator
     probable_rem = (
         w["audio_tier"] == "snore"
-        or (regularity < REGULARITY_THRESHOLD_LOW and mp < MOVEMENT_THRESHOLD_LOW)
+        or (regularity < REGULARITY_THRESHOLD_LOW and mp < mp_low)
     )
 
     return LIGHT_REM, probable_rem, deep_candidate
@@ -522,6 +584,17 @@ def classify_session(session_id, db_path):
     Writes to sleep_stages table.  Returns dict of derived metrics (empty on failure).
     """
     migrate_schema(db_path)
+
+    thr = load_thresholds(db_path)
+    if thr is not None:
+        log.info(
+            f"Using personal thresholds from {thr.computed_at}: "
+            f"movement=[{thr.movement_low:.3f}, {thr.movement_high:.3f}]  "
+            f"breathing=[{thr.breathing_low:.1f}, {thr.breathing_high:.1f}] BPM"
+        )
+    else:
+        log.info("Using default thresholds (no personal calibration active)")
+
     windows = _load_windows(session_id, db_path)
     if not windows:
         return {}
@@ -533,7 +606,7 @@ def classify_session(session_id, db_path):
     raw_stages, deep_cands, prob_rem = [], [], []
     for i, w in enumerate(windows):
         reg  = _compute_regularity(br_arr, i)
-        stg, pr, dc = _heuristic_single(w, reg)
+        stg, pr, dc = _heuristic_single(w, reg, thr)
         raw_stages.append(stg)
         deep_cands.append(dc)
         prob_rem.append(pr)

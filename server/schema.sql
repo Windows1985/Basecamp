@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS evening_log (
     notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS personal_thresholds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    computed_at TEXT NOT NULL,
+    nights_used INTEGER NOT NULL,
+    movement_low REAL NOT NULL,
+    movement_high REAL NOT NULL,
+    breathing_low REAL NOT NULL,
+    breathing_high REAL NOT NULL,
+    breathing_mean REAL NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS recovery_scores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER REFERENCES sleep_sessions(id),

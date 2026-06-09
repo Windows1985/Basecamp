@@ -57,6 +57,17 @@ def migrate_schema(db_path):
                 stress INTEGER,
                 notes TEXT
             );
+            CREATE TABLE IF NOT EXISTS personal_thresholds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                computed_at TEXT NOT NULL,
+                nights_used INTEGER NOT NULL,
+                movement_low REAL NOT NULL,
+                movement_high REAL NOT NULL,
+                breathing_low REAL NOT NULL,
+                breathing_high REAL NOT NULL,
+                breathing_mean REAL NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS service_heartbeats (
                 service_name TEXT PRIMARY KEY,
                 last_heartbeat REAL,
