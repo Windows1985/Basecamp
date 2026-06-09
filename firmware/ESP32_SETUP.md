@@ -10,6 +10,14 @@ Step-by-step guide for building, configuring, and flashing both ESP32-S3 nodes.
 
 - ESP32-S3-DevKitC-1 N16R8 × 2
 - USB-C cable connected to your Windows machine
+
+**Software**
+
+- `pip install esptool`
+- `pip install esp-idf-nvs-partition-gen`
+
+**Router / Network**
+
 - Pi's static IP address reserved in your router's DHCP settings before starting — you need this for the UDP target config
 - `RuView-24` dedicated 2.4GHz legacy SSID active on the ASUS RT-BE router
 
@@ -41,12 +49,14 @@ Build output appears in `build/`. First build takes 3–5 minutes; incremental r
 
 ## 2. Clone ESP32-CSI-Tool
 
+Run this from the repo root (same directory as pi_setup.sh and firmware/):
+
 ```bash
-git clone https://github.com/StevenMHernandez/ESP32-CSI-Tool.git
-cd ESP32-CSI-Tool/active_sta
+git clone https://github.com/StevenMHernandez/ESP32-CSI-Tool.git firmware/active_sta
+cd firmware/active_sta
 ```
 
-All commands below run from `active_sta/`.
+This clones ESP32-CSI-Tool directly into `firmware/active_sta/` so that `flash.sh` can find the build at `firmware/active_sta/build/`. All commands below run from `firmware/active_sta/`.
 
 ---
 
@@ -192,9 +202,6 @@ while True:
 
 Expected: 5 packets within 10 seconds.
 
-> **Note:** At this point the node is using the compiled-in Kconfig defaults for Node ID,
-> target IP, and UDP port. Provision it in Step 7.5 before relying on those values.
-
 ---
 
 ## 7.5. Provision Node 1
@@ -310,22 +317,7 @@ Expected: two IPs, each with ~20 packets. If only one IP appears, the second nod
 
 ## 10. Flash Scripts
 
-To avoid reconstructing commands in HK, save these as `firmware/flash_node1.bat` and `firmware/flash_node2.bat`. Edit the COM port and Pi IP before use.
-
-**flash_node1.bat**
-```bat
-@echo off
-echo Flashing Node 1 -- make sure ESP32-S3 is in download mode (hold BOOT, press RESET)
-python -m esptool --chip esp32s3 --port COM7 --baud 460800 ^
-  --before default-reset --after hard-reset ^
-  write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB ^
-  0x0     active_sta\build\bootloader\bootloader.bin ^
-  0x8000  active_sta\build\partition_table\partition-table.bin ^
-  0x10000 active_sta\build\esp32-csi-node.bin
-pause
-```
-
-**flash_node2.bat** — identical, points to Node 2 build directory (rebuild after changing Node ID to 2 in menuconfig).
+See firmware/flash.sh for the primary flash script and firmware/provision.py for provisioning. Both are committed to the repo.
 
 ---
 
@@ -336,8 +328,8 @@ pause
 | `A fatal error occurred: Failed to connect` | Not in download mode | Hold BOOT, press RESET, release BOOT, retry immediately |
 | `No serial port found` | Wrong COM port or driver missing | Device Manager → check CP210x or CH340 driver is installed |
 | `WiFi connecting...` loop | Wrong SSID/password, or 5GHz band | Verify RuView-24 is 2.4GHz legacy; check password in menuconfig |
-| No UDP packets on Pi | Wrong UDP target IP, firewall | Verify Pi's IP matches menuconfig; check `ufw status` on Pi |
-| Packets from only 1 node | Node 2 not connected | Check Node 2 serial output; verify Node ID was changed and reflashed |
+| No UDP packets on Pi | Wrong UDP target IP, firewall | Verify Pi's IP matches --target-ip passed to provision.py; check `ufw status` on Pi |
+| Packets from only 1 node | Node 2 not connected | Check Node 2 serial output; verify provision.py was run with --node-id 2 |
 | CSI data looks wrong / all zeros | FreeRTOS tick rate at default 100Hz | Set to 1000Hz in menuconfig, rebuild |
 | `--flash-size detect` shows 4MB | Wrong flash size flag | Use `--flash-size 16MB` explicitly for N16R8 |
 | Node ID in serial output is wrong | provision.py not run yet or NVS not picked up | Run provision.py, power-cycle, check serial output |
