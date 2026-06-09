@@ -36,6 +36,40 @@ def run_pipeline(session_id=None, db_path=None):
     except Exception as _backup_exc:
         print(f"[0/7] WARNING: pre-pipeline backup error: {_backup_exc}")
 
+    # Threshold calibration — only recompute after 7 new nights since last run
+    try:
+        _should_calibrate = True
+        try:
+            _cal_conn = get_connection(db_path)
+            try:
+                _n_complete = _cal_conn.execute(
+                    "SELECT COUNT(*) FROM sleep_sessions WHERE bed_exit IS NOT NULL"
+                ).fetchone()[0]
+                _last_thr = _cal_conn.execute(
+                    "SELECT nights_used FROM personal_thresholds WHERE is_active=1 "
+                    "ORDER BY computed_at DESC LIMIT 1"
+                ).fetchone()
+            finally:
+                _cal_conn.close()
+            if _last_thr is not None:
+                _should_calibrate = (_n_complete - _last_thr["nights_used"]) >= 7
+        except Exception:
+            pass  # table not yet created — let compute_thresholds handle it
+
+        if _should_calibrate:
+            from pipeline.calibrate import compute_thresholds
+            _thr = compute_thresholds(db_path)
+            if _thr is not None:
+                print(
+                    f"[0b/7] Thresholds updated from {_thr.nights_used} nights: "
+                    f"movement=[{_thr.movement_low:.3f}, {_thr.movement_high:.3f}]  "
+                    f"breathing=[{_thr.breathing_low:.1f}, {_thr.breathing_high:.1f}] BPM"
+                )
+            else:
+                print("[0b/7] Threshold calibration: insufficient data (< 7 nights)")
+    except Exception as _cal_exc:
+        print(f"[0b/7] WARNING: calibration error: {_cal_exc}")
+
     summary = {
         "session_id": None,
         "features":   None,
