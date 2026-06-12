@@ -1,13 +1,13 @@
 """
-Touchscreen UI controller for Basecamp — 240×320 IPS SPI display (ILI9341/ST7789).
+Touchscreen UI controller for Basecamp -- 240×320 IPS SPI display (ILI9341/ST7789).
 
 In mock mode (MOCK_HARDWARE=True) renders to a 480×640 pygame window so the UI
 is fully interactive on a development machine.  All three layouts (IDLE,
 BEDTIME_PROMPT, MORNING) are contained here.
 
 sleepmode.py drives this module by calling:
-  screen.tick()                       — every second (clock / animation update)
-  screen.get_pending_action()         — every second (returns touch result or None)
+  screen.tick()                       -- every second (clock / animation update)
+  screen.get_pending_action()         -- every second (returns touch result or None)
 """
 import os
 import sys
@@ -124,7 +124,7 @@ class BasecampScreen:
 
     def _init_pygame(self):
         if not _PYGAME_OK:
-            log.warning("pygame unavailable — BasecampScreen running headless")
+            log.warning("pygame unavailable -- BasecampScreen running headless")
             self._headless = True
             return
         try:
@@ -186,13 +186,13 @@ class BasecampScreen:
             self._spi_device = ili9341(serial, width=self.W, height=self.H)
             log.info("luma.lcd ILI9341 SPI display initialised")
         except Exception as e:
-            log.debug("luma.lcd unavailable (%s) — framebuffer only", e)
+            log.debug("luma.lcd unavailable (%s) -- framebuffer only", e)
             self._spi_device = None
 
     def _init_rects(self):
         if not _PYGAME_OK:
             return
-        # Hit-rects are pure data — no display needed
+        # Hit-rects are pure data -- no display needed
         self._not_yet_rect = _pg.Rect(20, 170, 200, 50)   # x=20..220, y=170..220
         self._yes_rect     = _pg.Rect(20, 235, 200, 65)   # x=20..220, y=235..300
         self._log_rect     = _pg.Rect(0,  265, 240, 55)   # x=0..240,  y=265..320
@@ -379,7 +379,7 @@ class BasecampScreen:
             f_label = self._font(11)
             f_brand = self._font(9)
 
-            # Time and date — upper half
+            # Time and date -- upper half
             self._text(surf, time_str, f_time, _WHITE, center=(self.W // 2, 75))
             self._text(surf, date_str, f_date, _MUTED, center=(self.W // 2, 108))
 
@@ -412,7 +412,7 @@ class BasecampScreen:
     def show_bedtime_prompt(self):
         """
         Render the BEDTIME_PROMPT layout and start the 5-minute timeout.
-        Non-blocking — caller polls get_pending_action() for 'yes'/'not_yet'/'timeout'.
+        Non-blocking -- caller polls get_pending_action() for 'yes'/'not_yet'/'timeout'.
         """
         self._current_layout    = "bedtime_prompt"
         self._prompt_start_time = time.monotonic()
@@ -448,13 +448,13 @@ class BasecampScreen:
             # Separator
             _pg.draw.line(surf, _BORDER, (20, 155), (220, 155), 1)
 
-            # NOT YET button — y=170..220
+            # NOT YET button -- y=170..220
             ny_rect = _pg.Rect(20, 170, 200, 50)
             self._rounded_rect(surf, _CARD_BG, ny_rect, radius=8,
                                border_color=_BORDER, border=1)
             self._text(surf, "NOT YET", f_btn, _MUTED, center=ny_rect.center)
 
-            # YES button — y=235..300
+            # YES button -- y=235..300
             yes_rect = _pg.Rect(20, 235, 200, 65)
             self._rounded_rect(surf, _TEAL, yes_rect, radius=8)
             self._text(surf, "YES", f_yes, _BG, center=yes_rect.center)
@@ -542,7 +542,7 @@ class BasecampScreen:
         f_fact  = self._font(10)
         f_hint  = self._font(9)
 
-        # Score number — centred at y=78, colour by range
+        # Score number -- centred at y=78, colour by range
         score_n = int(round(self._score)) if self._score is not None else 0
         s_clr   = _score_color(score_n)
         self._text(surf, str(score_n), f_big, s_clr, center=(self.W // 2, 78))
@@ -599,7 +599,7 @@ class BasecampScreen:
     # ── Touch / action ────────────────────────────────────────────────────────
 
     def simulate_touch(self, x: int, y: int):
-        """Inject a synthetic touch at (x, y) in 240×320 space — for tests and mock mode."""
+        """Inject a synthetic touch at (x, y) in 240×320 space -- for tests and mock mode."""
         self._touch_queue.append((x, y))
 
     def get_pending_action(self):
@@ -686,7 +686,7 @@ class BasecampScreen:
             pass
         return None
 
-    # ── Tick — called every second by sleepmode.py ────────────────────────────
+    # ── Tick -- called every second by sleepmode.py ────────────────────────────
 
     def tick(self):
         """
@@ -724,6 +724,64 @@ class BasecampScreen:
             except Exception:
                 pass
         self._headless = True
+
+
+# ── Auto-wake controller ──────────────────────────────────────────────────────
+
+class AutoWake:
+    """
+    Manages screen backlight state based on presence events.
+
+    States:
+      SLEEP_ACTIVE  -- sleep session in progress; backlight forced off
+      IDLE          -- no session; backlight off; tap-to-wake available
+      AWAKE         -- backlight on; idle timer counting down to IDLE
+
+    Transitions:
+      bed_exit()    -- any state -> AWAKE (starts idle timer)
+      sleep_start() -- any state -> SLEEP_ACTIVE
+      tick()        -- AWAKE -> IDLE when idle_timeout_s elapses
+    """
+
+    SLEEP_ACTIVE = "sleep_active"
+    IDLE         = "idle"
+    AWAKE        = "awake"
+
+    def __init__(self, screen: BasecampScreen, idle_timeout_s: int = None):
+        self._screen  = screen
+        if idle_timeout_s is None:
+            try:
+                from server.config import SCREEN_IDLE_TIMEOUT_S
+                idle_timeout_s = SCREEN_IDLE_TIMEOUT_S
+            except (ImportError, AttributeError):
+                idle_timeout_s = 60
+        self._timeout   = idle_timeout_s
+        self._state     = self.IDLE
+        self._wake_mono = None   # monotonic time when AWAKE state was entered
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def bed_exit(self):
+        self._state     = self.AWAKE
+        self._wake_mono = time.monotonic()
+        self._screen.turn_on()
+
+    def sleep_start(self):
+        self._state = self.SLEEP_ACTIVE
+        self._screen.turn_off()
+
+    def tap(self):
+        if self._state != self.SLEEP_ACTIVE:
+            self.bed_exit()
+
+    def tick(self):
+        if (self._state == self.AWAKE
+                and self._wake_mono is not None
+                and time.monotonic() - self._wake_mono >= self._timeout):
+            self._state = self.IDLE
+            self._screen.turn_off()
 
 
 # ── Demo mode entry point ─────────────────────────────────────────────────────
@@ -779,7 +837,7 @@ if __name__ == "__main__":
             layout_idx = 0
             last_switch = _time.monotonic()
 
-            print(f"[DEMO] Starting — layout: {LAYOUTS[layout_idx]}")
+            print(f"[DEMO] Starting -- layout: {LAYOUTS[layout_idx]}")
 
             while True:
                 # Handle quit event

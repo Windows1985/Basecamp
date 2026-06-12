@@ -1,5 +1,5 @@
 """
-Sensor logger daemon — reads all four environmental sensors every 30 seconds
+Sensor logger daemon -- reads all four environmental sensors every 30 seconds
 and writes one row to sensor_readings. Runs overnight on the Pi.
 """
 import os
@@ -19,7 +19,7 @@ from server.config import (
 from server.db import init_db, get_connection
 
 # ---------------------------------------------------------------------------
-# Hardware imports (optional — fall back to mock if unavailable)
+# Hardware imports (optional -- fall back to mock if unavailable)
 # ---------------------------------------------------------------------------
 try:
     import smbus2
@@ -184,6 +184,35 @@ def _read_sgp40_direct(bus):
 
 
 # ---------------------------------------------------------------------------
+# Undervoltage check (both ESP32 nodes now share the Pi's USB supply in v4)
+# ---------------------------------------------------------------------------
+
+def _check_undervoltage():
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            ["vcgencmd", "get_throttled"],
+            capture_output=True, text=True, timeout=3,
+        )
+        val = result.stdout.strip()
+        # get_throttled returns hex bitmask; bit 0 = currently under-voltage
+        if "=" in val:
+            bits = int(val.split("=")[1], 16)
+            if bits & 0x1:
+                log.warning(
+                    "Pi undervoltage detected (vcgencmd get_throttled=%s). "
+                    "Both ESP32 nodes share the Pi USB supply in v4 -- "
+                    "verify the PSU is the official 5V/3A adapter and "
+                    "the Node 2 cable is 20AWG or thicker.",
+                    val,
+                )
+            else:
+                log.info("Power supply OK (get_throttled=%s)", val)
+    except Exception as e:
+        log.debug("vcgencmd check skipped: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Daemon state
 # ---------------------------------------------------------------------------
 _running = True
@@ -203,7 +232,7 @@ def _init_hardware():
     sensors_fail = []
 
     if not _SMBUS_AVAILABLE:
-        log.warning("smbus2 not available — hardware init skipped")
+        log.warning("smbus2 not available -- hardware init skipped")
         return sensors_ok, sensors_fail
 
     try:
@@ -352,10 +381,11 @@ def run():
 
     if MOCK_HARDWARE:
         log.info("Starting sensor logger in MOCK mode")
-        print("Sensor logger started — MOCK mode")
+        print("Sensor logger started -- MOCK mode")
     else:
+        _check_undervoltage()
         sensors_ok, sensors_fail = _init_hardware()
-        msg = f"Sensor logger started — OK: {sensors_ok}"
+        msg = f"Sensor logger started -- OK: {sensors_ok}"
         if sensors_fail:
             msg += f"  FAILED: {sensors_fail}"
         log.info(msg)
