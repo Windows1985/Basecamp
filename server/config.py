@@ -15,6 +15,7 @@ SHT40_ADDR = 0x44
 BH1750_ADDR = 0x23
 SCD40_ADDR = 0x62
 SGP40_ADDR = 0x59
+DS3231_ADDR = 0x68   # RTC module; provides offline timekeeping (fake-hwclock must be disabled)
 NTFY_TOPIC = "basecamp-recovery"
 NTFY_SERVER = "https://ntfy.sh"
 RECOVERY_WEIGHTS = {
@@ -26,9 +27,26 @@ RECOVERY_WEIGHTS = {
 
 MOCK_HARDWARE = True
 
+# Node power: both ESP32 nodes draw from Pi USB-A ports (no hub).
+# Combined peak ~0.8A, within Pi 4's 1.2A USB budget.
+NODE2_USB_POWER = True   # Node 2 powered from Pi USB-A via 5m 20AWG cable
+
 # Screen and button GPIO
-SCREEN_BACKLIGHT_PIN = 22   # GPIO 22 (GPIO 24 is SPI DC — conflicts with touchscreen)
+SCREEN_ROTATION = 90
+SCREEN_BACKLIGHT_PIN = 22   # GPIO 22 (GPIO 24 is SPI DC -- conflicts with touchscreen)
 BUTTON_PIN = 26
+
+# Auto-wake: screen and glow LED come on at bed exit, off after idle
+SCREEN_IDLE_TIMEOUT_S = 60   # seconds before backlight turns off after bed exit
+
+# Recovery glow LED GPIO (RGB common-cathode, via resistors)
+GLOW_R_PIN = 16
+GLOW_G_PIN = 20
+GLOW_B_PIN = 21
+
+# Glow colour thresholds (score out of 100; divided by 10 for 0-10 display scale)
+GLOW_GREEN_THRESHOLD = 70   # score >= 70 -> green (>=7/10)
+GLOW_AMBER_THRESHOLD = 40   # score 40-69 -> amber (4-6.9/10); below 40 -> red
 
 # Sleep mode timing
 BEDTIME_WINDOW_START = 21

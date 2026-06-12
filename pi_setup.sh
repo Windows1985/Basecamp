@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Basecamp — Raspberry Pi 4 setup script
+# Basecamp -- Raspberry Pi 4 setup script
 # Run as: sudo bash pi_setup.sh
 # Target: Raspberry Pi OS Lite 64-bit (Debian Bookworm), user "pi"
 # Repo must already be cloned to /home/pi/basecamp before running.
@@ -130,7 +130,7 @@ step3_boot_config() {
         raspi-config nonint do_serial_cons 1 || warn "do_serial_cons failed (non-fatal)"
         ok "Serial port: hardware enabled, login shell disabled"
     else
-        warn "raspi-config not found — configure serial manually"
+        warn "raspi-config not found -- configure serial manually"
     fi
 }
 
@@ -144,7 +144,7 @@ step4_interfaces() {
         ok "I2C enabled"
         ok "SPI enabled"
     else
-        warn "raspi-config not found — enable I2C/SPI manually or via boot config"
+        warn "raspi-config not found -- enable I2C/SPI manually or via boot config"
     fi
 }
 
@@ -153,7 +153,7 @@ step 5 "I2C bus scan (verify sensor wiring)"
 
 step5_i2c_scan() {
     if ! command -v i2cdetect > /dev/null 2>&1; then
-        warn "i2cdetect not found — cannot scan I2C bus"
+        warn "i2cdetect not found -- cannot scan I2C bus"
         return
     fi
 
@@ -174,7 +174,7 @@ step5_i2c_scan() {
         if printf '%s' "${i2c_output}" | grep -qi " ${addr}"; then
             ok "Found 0x${addr} (${expected[0x${addr}]})"
         else
-            warn "NOT found: 0x${addr} (${expected[0x${addr}]}) — check wiring"
+            warn "NOT found: 0x${addr} (${expected[0x${addr}]}) -- check wiring"
         fi
     done
 }
@@ -213,7 +213,7 @@ step7_database() {
     if [ -f "${db_path}" ]; then
         ok "Database created: ${db_path}"
     else
-        warn "Database file not found at expected path — check DB_PATH in server/config.py"
+        warn "Database file not found at expected path -- check DB_PATH in server/config.py"
     fi
 }
 
@@ -223,7 +223,7 @@ step 8 "Systemd service installation"
 step8_services() {
     local svc_src="${BASECAMP_DIR}/systemd"
     if [ ! -d "${svc_src}" ]; then
-        warn "systemd/ directory not found — skipping service install"
+        warn "systemd/ directory not found -- skipping service install"
         return
     fi
 
@@ -249,7 +249,7 @@ step8_services() {
     ok "Service files updated to use venv Python (${PYTHON})"
 
     # Ensure the crash-notification template service is in place.
-    # Do NOT enable or start it directly — systemd instantiates it via OnFailure.
+    # Do NOT enable or start it directly -- systemd instantiates it via OnFailure.
     sudo cp "${svc_src}/basecamp-notify@.service" /etc/systemd/system/ 2>/dev/null || true
 
     systemctl daemon-reload
@@ -280,44 +280,121 @@ step8_services() {
         printf '  Skipped (no timer file): basecamp-backup.timer\n'
     fi
 
-    warn "Services are NOT started yet — reboot first (see final instructions)"
+    warn "Services are NOT started yet -- reboot first (see final instructions)"
 }
 
-# ── Step 9: Hotspot reminder ───────────────────────────────────────────────────
-step 9 "Hotspot configuration note"
+# ── Step 9: Hotspot setup (canonical) ─────────────────────────────────────────
+step 9 "Hotspot AP setup (wlan0 = ESP32 nodes, eth0 = internet)"
 
-step9_hotspot_note() {
-    if [ -f "${BASECAMP_DIR}/pi_setup_hotspot.sh" ]; then
-        ok "pi_setup_hotspot.sh is present in the repo"
-    fi
-    printf '
-  At Cate School (no local router access):
-    sudo bash %s/pi_setup_hotspot.sh
-  This turns the Pi into an access point on wlan0 (SSID: Basecamp-Node)
-  and routes internet via eth0.  Do NOT run at home.\n' "${BASECAMP_DIR}"
-}
+# Configuration
+AP_SSID="Basecamp-Node"
+AP_PASS="basecamp2024"
+AP_CHANNEL="6"
+AP_IP="192.168.4.1"
+DHCP_RANGE_START="192.168.4.2"
+DHCP_RANGE_END="192.168.4.20"
+DHCP_NETMASK="255.255.255.0"
 
-# ── Step 10: Router reminder ───────────────────────────────────────────────────
-step 10 "Router configuration reminder"
+step9_hotspot() {
+    apt-get install -y -qq hostapd dnsmasq iptables-persistent
+    ok "hostapd, dnsmasq, iptables-persistent installed"
 
-step10_router() {
-banner "ROUTER SETUP REQUIRED (home network)"
-cat << 'EOF'
-Log into router at 192.168.50.1
-Create new 2.4GHz SSID: RuView-24
-Settings:
-  Mode: N only (not AX or BE)
-  Channel width: 20MHz
-  MU-MIMO: disabled
-  Beamforming: disabled
-  BSS Colouring: disabled
-  Airtime Fairness: disabled
-  Smart Connect: disabled
-  Band Steering: disabled
-ESP32s connect to RuView-24
-Pi connects via ethernet only
+    systemctl stop wpa_supplicant || true
+    systemctl disable wpa_supplicant || true
+    ok "wpa_supplicant disabled"
+
+    DHCPCD_CONF="/etc/dhcpcd.conf"
+    DHCPCD_MARKER="# Basecamp hotspot -- wlan0 static"
+    if ! grep -qF "${DHCPCD_MARKER}" "${DHCPCD_CONF}" 2>/dev/null; then
+        cat >> "${DHCPCD_CONF}" << EOF
+
+${DHCPCD_MARKER}
+interface wlan0
+    static ip_address=${AP_IP}/24
+    nohook wpa_supplicant
 EOF
-printf '\033[1;36m%s\033[0m\n' "═══════════════════════════════════════"
+        ok "Added wlan0 static config to ${DHCPCD_CONF}"
+    else
+        ok "wlan0 static config already present"
+    fi
+
+    cat > /etc/hostapd/hostapd.conf << EOF
+interface=wlan0
+driver=nl80211
+ssid=${AP_SSID}
+hw_mode=g
+channel=${AP_CHANNEL}
+ieee80211n=1
+wmm_enabled=0
+ht_capab=[HT20]
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=${AP_PASS}
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+country_code=US
+EOF
+    ok "Written /etc/hostapd/hostapd.conf (SSID: ${AP_SSID}, channel ${AP_CHANNEL})"
+
+    HOSTAPD_DEFAULT="/etc/default/hostapd"
+    if grep -q "^#DAEMON_CONF" "${HOSTAPD_DEFAULT}" 2>/dev/null; then
+        sed -i 's|^#DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' "${HOSTAPD_DEFAULT}"
+    elif ! grep -q "^DAEMON_CONF" "${HOSTAPD_DEFAULT}" 2>/dev/null; then
+        printf 'DAEMON_CONF="/etc/hostapd/hostapd.conf"\n' >> "${HOSTAPD_DEFAULT}"
+    fi
+    systemctl unmask hostapd
+    ok "hostapd configured"
+
+    cat > /etc/dnsmasq.d/basecamp-hotspot.conf << EOF
+# Basecamp hotspot -- DHCP for ESP32 nodes on wlan0
+interface=wlan0
+dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_NETMASK},24h
+domain=basecamp.local
+address=/gw.basecamp.local/${AP_IP}
+EOF
+    ok "Written /etc/dnsmasq.d/basecamp-hotspot.conf"
+
+    SYSCTL_CONF="/etc/sysctl.d/99-basecamp-forward.conf"
+    if [ ! -f "${SYSCTL_CONF}" ]; then
+        printf 'net.ipv4.ip_forward=1\n' > "${SYSCTL_CONF}"
+    fi
+    sysctl -p "${SYSCTL_CONF}" > /dev/null
+    iptables -t nat -F POSTROUTING 2>/dev/null || true
+    iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+    iptables -A FORWARD -i eth0  -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -A FORWARD -i wlan0 -o eth0  -j ACCEPT
+    netfilter-persistent save
+    ok "IP forwarding and NAT rules saved"
+
+    systemctl enable dnsmasq
+    systemctl enable hostapd
+    ok "hostapd and dnsmasq enabled (active after reboot)"
+
+    printf '
+  Hotspot: SSID "%s" on 2.4GHz channel %s (ESP32 nodes only)
+  Pi internet: eth0 (DHCP)
+  Dashboard: http://basecamp.local:5000 via LAN or http://%s:5000 via hotspot\n' \
+        "${AP_SSID}" "${AP_CHANNEL}" "${AP_IP}"
+}
+
+# ── Step 10: DS3231 RTC ────────────────────────────────────────────────────────
+step 10 "DS3231 RTC overlay"
+
+step10_rtc() {
+    append_if_missing "dtoverlay=i2c-rtc,ds3231" "${CONFIG_FILE}"
+    ok "DS3231 RTC overlay added to boot config"
+
+    # Disable fake-hwclock if present (conflicts with DS3231)
+    if systemctl is-enabled fake-hwclock &>/dev/null; then
+        systemctl disable fake-hwclock || true
+        systemctl stop fake-hwclock    || true
+        ok "fake-hwclock disabled (DS3231 provides hardware-backed time)"
+    else
+        ok "fake-hwclock not active"
+    fi
 }
 
 # ── Step 11: SCD40 calibration reminder ───────────────────────────────────────
@@ -332,7 +409,7 @@ Before first overnight run:
 3. Wait 3 minutes for reading to stabilise
 4. Confirm reading is between 400-450ppm
 If reading is outside this range the sensor
-may be a clone — check the chip markings.
+may be a clone -- check the chip markings.
 EOF
 printf '\033[1;36m%s\033[0m\n' "═══════════════════════════════════════"
 }
@@ -360,12 +437,12 @@ cat << 'EOF'
 Next steps:
 1. Reboot: sudo reboot
 2. After reboot verify services: systemctl status basecamp-*
-3. Flash ESP32s and connect to RuView-24
+3. Flash ESP32s, connect to Basecamp-Node (wlan0 AP on the Pi)
 4. Run SCD40 calibration (see above)
 5. Run SGP40 burn-in: leave running 24h before trusting VOC readings
 6. Check logs: tail -f /home/pi/basecamp/logs/*.log
-7. Access morning log: http://<pi-ip>:5000
-8. Access dashboard: http://<pi-ip>:5000/dashboard
+7. Access morning log: http://basecamp.local:5000 (via LAN) or http://192.168.4.1:5000 (via hotspot)
+8. Access dashboard: http://basecamp.local:5000/dashboard
 EOF
 printf '\033[1;36m%s\033[0m\n' "═══════════════════════════════════════"
 
@@ -398,11 +475,37 @@ main() {
     step6_directories
     step7_database
     step8_services
-    step9_hotspot_note
-    step10_router
+    step9_hotspot
+    step10_rtc
     step11_scd40
     step12_mock_hardware
     step13_summary
 }
 
 main "$@"
+
+# ==============================================================================
+# DEPRECATED APPENDIX: Router-dependent setup (v1/v2/v3 legacy)
+#
+# The canonical setup is the hotspot configuration above (pi_setup.sh steps 9+).
+# The instructions below are retained for reference only. They configure the
+# ESP32 nodes to connect to a dedicated 2.4GHz SSID on an ASUS WiFi 7 router
+# rather than the Pi's own AP.
+#
+# Limitations of the router-dependent approach (reasons it was deprecated):
+#   - Router configuration must be repeated at each location (HK, Shenzhen, Cate).
+#   - Different routers produce different RF environments; CSI baselines do not
+#     transfer between sites without retraining.
+#   - Incompatible with school and dorm network infrastructure.
+#   - Requires the ASUS router to be present; not portable.
+#
+# To use this approach instead of the hotspot (not recommended):
+#   1. Skip step9_hotspot above.
+#   2. Log into the ASUS router at 192.168.50.1.
+#   3. Create a new 2.4GHz SSID: RuView-24
+#      Settings: Mode=N only, Channel width=20MHz, MU-MIMO=disabled,
+#      Beamforming=disabled, BSS Colouring=disabled, Airtime Fairness=disabled,
+#      Smart Connect=disabled, Band Steering=disabled.
+#   4. Configure ESP32 firmware with SSID=RuView-24 and UDP target = Pi LAN IP.
+#   5. Set a DHCP reservation for the Pi's MAC in the router admin panel.
+# ==============================================================================
