@@ -22,9 +22,9 @@ The main components are listed below. See `hardware/bom.md` for the full bill of
 | SCD40 | 1 | CO2 sensor; I2C address 0x62; verify chip markings before use |
 | SGP40 | 1 | VOC index sensor; I2C address 0x59 |
 | 2.8 inch IPS SPI touchscreen | 1 | ILI9341 or ST7789 driver, 240x320 pixels |
-| Powered 4-port USB hub | 1 | Powers both ESP32 nodes independently |
+| DS3231 RTC module | 1 | Battery-backed real-time clock; maintains timestamps during offline power cycles |
 
-The enclosure is 3D printed in matte black PLA at approximately 150 by 100 by 70mm. It mounts the Pi on M2.5 standoffs with cable grommets for a clean external profile. The prototype uses a breadboard; the enclosure is designed around the same component layout. See `hardware/wiring.md` for full GPIO assignments and `hardware/bom.md` for the complete component list.
+The enclosure is 3D printed in matte black PLA at 96 x 136 x 49mm assembled (pod peak 74mm). The v4 magnetic-lid design lifts off tool-free for daily access; two M3x45 travel screws thread through the rear posts for transport only. Both ESP32 nodes power directly from the Pi's rear USB-A ports (no hub required). Networking uses a hotspot-first architecture: wlan0 runs as an isolated AP for the ESP32 nodes (the WiFi link exists solely because CSI is a property of a WiFi association), and eth0 provides internet and dashboard access. See `hardware/wiring.md` for GPIO assignments, `hardware/bom.md` for the complete component list, and `docs/networking.md` for the wlan0/eth0 architecture.
 
 ## Architecture
 
@@ -70,7 +70,7 @@ The fixed weights reflect published sleep science on which factors most reliably
 - No SpO2 measurement is included; oxygen saturation monitoring requires a contact sensor.
 - Sleep staging accuracy is limited by the absence of EEG ground truth; the three-class classifier is trained on heuristic labels, not PSG-validated annotations.
 - Heart rate from CSI is trend-level only and is not reported as a precise per-beat measurement.
-- The dedicated 2.4GHz legacy SSID workaround for WiFi 7 routers is untested at scale in the CSI community and may require a fallback travel router in some environments.
+- The Pi's single radio chip cannot simultaneously run as an AP (for the ESP32 nodes) and a station client; internet access requires eth0.
 - The personalised recovery predictor requires a minimum of 14 labelled nights before the machine learning layer activates; the fixed-weight model runs until then.
 - The SGP40 VOC sensor requires approximately 24 hours of burn-in before its readings are reliable.
 
